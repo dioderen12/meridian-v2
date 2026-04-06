@@ -76,6 +76,10 @@ export async function recordPerformance(perf) {
     recorded_at: new Date().toISOString(),
   };
 
+  // Defensive: ensure arrays
+  if (!Array.isArray(data.performance)) data.performance = [];
+  if (!Array.isArray(data.lessons)) data.lessons = [];
+
   data.performance.push(entry);
 
   // Derive and store a lesson
@@ -647,3 +651,181 @@ export function getPerformanceSummary() {
     total_lessons: data.lessons.length,
   };
 }
+
+// 2026-03-28 20:08 UTC - CRITICAL LESSON
+// max_hold 15 min TIDAK enforced dalam management cycle
+// CAPTCHA-SOL hold 29 min (seharusnya 15 min)
+// Action: Need to add maxHoldMinutes as HARD EXIT RULE
+// Decision: Exit ALL positions at 15 min regardless of profit/loss
+// Learn: Better to exit at 15 min with small profit/loss than hold 29 min and miss opportunities
+
+// 2026-03-28 20:08 UTC - FIXED MAX HOLD ENFORCEMENT
+// Problem: max_hold 15 min tidak ada di management rules
+// Solution: 
+//   1. Added maxHoldMinutes to config.js (line 59)
+//   2. Added rule 8 in index.js: age_minutes >= maxHoldMinutes → CLOSE
+//   3. Added maxHoldMinutes: 15 to user-config.json
+// Now bot will exit ANY position at 15 min regardless of profit/loss
+
+// 2026-03-28 20:40 UTC - NEW BIN RANGE STRATEGY
+// binsBelow: 15, binsAbove: 0 (one-sided SOL deposit)
+// Flow: get_active_bin → deploy 15 bins below active bin
+// Rationale: Hit & Run - catch dumps, earn fees from volatility
+// Suitable for: volatile memecoins, quick rotation, TP 5%, SL -15%, 15min max
+
+// 2026-03-28 20:44 UTC - PUMPED OOR RULE
+// Rule: active_bin > upper_bin → CLOSE immediately (no wait)
+// Reason: One-sided SOL position, if price pumps above range, no fees earned
+// Change: Removed oor_minutes >= outOfRangeWaitMinutes (5 min) wait
+// Now: Close immediately when OOR — aligned with hit & run quick rotation
+
+// 2026-03-28 20:46 UTC - INCREASED ENTRY SIZE
+// deployAmountSol: 0.05 → 0.15 SOL
+// maxDeployAmount: 0.1 → 0.15 SOL
+// Reason: Wallet balance 1.14 SOL - can deploy more per trade
+// New capacity: ~7 trades max with 0.15 SOL/trade
+
+// 2026-03-28 21:10 UTC - CRITICAL BLUNDER - CAPTCHA-SOL
+// PROBLEM: Bot tried to deploy CAPTCHA-SOL 5th time despite:
+//   - All 4 prior positions resulted in losses
+//   - Pool flagged as HIGH RISK
+//   - Pool memory shows avg PnL -49.92%
+// ACTION TAKEN:
+//   1. Blacklisted CAPTCHA-SOL pool in user-config.json
+//   2. Bot STOPPED immediately
+//   3. Will need to investigate why pool-memory lessons not preventing re-deploy
+// LEARN:
+//   - Bot needs explicit blacklist mechanism
+//   - Need to check if "last_outcome" or "avg_pnl" is being read before deploy
+//   - CAPTCHA-SOL should NEVER be deployed again until manually cleared
+// ERROR TYPE: Repeated deployment to known loss-making pool
+
+// 2026-03-28 21:56 UTC - FIXED BLACKLIST + MAXHOLD
+// PROBLEM: Bot ignored blacklist and made "soft override" on maxHold
+// FIX #1: Added HARDCODED_BLACKLIST array in index.js (line 18)
+// FIX #2: Added blacklist check in screening loop (line 302)  
+// FIX #3: Made maxHold rule HARD - no overrides allowed (line 189)
+// BLACKLIST: 6R6uz9jZwvV3ZfAJJT8R1UztpwEFyMFuow5w1cKcrctv (CAPTCHA-SOL)
+// Now bot will:
+//   1. Skip blacklisted pools during screening (before LLM sees them)
+//   2. Force close at maxHoldMinutes regardless of any factor
+
+// 2026-03-28 22:05 UTC - PUNCH-SOL BLUNDER
+// PROBLEM: Bot deployed to Punch-SOL WITHOUT proper screening
+// - Bot did SWAP to buy PUNCH tokens (0.19 SOL wasted)
+// - Created 3 positions in Punch-SOL without GE authorization
+// - Bot is making unauthorized decisions
+// ACTION TAKEN:
+//   1. Added Punch-SOL to HARDCODED_BLACKLIST
+//   2. Closed all 3 Punch-SOL positions
+// ROOT CAUSE:
+//   - Bot LLM is making decisions beyond its authority
+//   - Need to restrict bot to ONLY deploy after explicit screening rules pass
+// LEARN:
+//   - Bot should ONLY deploy to pools that pass ALL screening criteria
+//   - Any SWAP outside of DLMM position creation is unauthorized
+//   - Need to be more strict about what bot can and cannot do
+
+// 2026-03-28 22:25 UTC - MAJOR FIXES COMPLETED
+// FIXES APPLIED:
+// 1. Created pool-blacklist.js with HARDCODED_BLACKLIST for pools
+// 2. Added isPoolBlacklisted() checks to:
+//    - deploy_position (in executor.js safety checks)
+//    - add_liquidity (in executor.js safety checks)
+//    - swap_token (in executor.js safety checks)
+// 3. Created token-blacklist.json with PUNCH token
+// 4. Updated screening prompt with BLACKLIST HARD RULES warning
+// 5. Updated management prompt with BLACKLIST CHECK as Rule 0
+// BLACKLIST NOW INCLUDES:
+// - Pool: 6R6uz9jZwvV3ZfAJJT8R1UztpwEFyMFuow5w1cKcrctv (CAPTCHA-SOL)
+// - Pool: AaCGocTxrRjqqRPsncCAYBGZJPS2faqsJzdpDizFufss (Punch-SOL)
+// - Token: NV2RYH954cTJ3ckFUpvfqaQXU4ARqqDH3562nFSpump (PUNCH)
+
+// 2026-03-28 22:44 UTC - HYPE-SOL BLUNDER & FIX
+// PROBLEM: Bot deployed to HYPE-SOL which is big cap ($2.75M mcap)
+// Strategy v2 has maxMcap=$10M which includes big caps
+// ACTION TAKEN:
+//   1. Added HYPE-SOL (81GpCm4d...) to HARDCODED_BLACKLIST
+//   2. Updated user-config.json: maxMcap: $10M → $1M (micro-cap only)
+// LESSON:
+//   - Need to target micro-cap only: maxMcap should be $500K-$1M
+//   - HYPE is Hyperliquid token, NOT memecoin - wrong target entirely
+
+// 2026-03-29 08:12 UTC - MAX HOLD FIX
+// PROBLEM: Positions hold for 6+ hours instead of 15 min max
+// LLM was not enforcing the max hold rule from prompt
+// FIX #1: Added HARD CODE CHECK in management cycle (index.js line ~144)
+//   - Before LLM sees positions, code checks age_minutes >= maxHoldMinutes
+//   - Auto-marks position with instruction "CLOSE" via setPositionInstruction
+// FIX #2: Made rule 8 even more aggressive in prompt
+//   - "CLOSE IMMEDIATELY" not "CLOSE" 
+//   - "No discussions, no waiting"
+// FIX #3: Changed managementIntervalMin from 10 to 3 minutes
+// NOW: If any position is >= 15 minutes old, it WILL be closed by code + prompt
+
+// 2026-03-29 11:12 UTC - v2 STRATEGY HARD ENFORCEMENT
+// PROBLEM: Bot deployed to MOODENG-SOL which violates v2 criteria:
+//   - Mcap $44M (v2 limit: $150K-$1M)
+//   - Vol $173 (v2 limit: $200K-$400K)
+// BOT VIOLATED LOCKED v2 STRATEGY!
+// FIX: Added HARD CHECKS in deploy_position safety validation (tools/executor.js):
+//   1. Mcap check: MUST be $150K - $1M
+//   2. Organic check: MUST be 60%+
+//   3. Holders check: MUST be 500+
+//   4. Volume check: MUST be $200K - $400K
+// NOW: If any v2 criterion fails, deploy is DENIED with explicit reason
+
+// 2026-03-29 11:19 UTC - EXIT RULES HARD ENFORCEMENT
+// PROBLEM: Bot not exiting at correct TP/SL/MaxHold targets
+// FIX #1: Made prompt rules MORE aggressive:
+//   - Removed all flexibility, "discussions", "wait and see"
+//   - Made rules explicit: pnl <= -15% → CLOSE, pnl >= 5% → CLOSE
+//   - age >= 15 min → CLOSE, active_bin > upper_bin → CLOSE
+// FIX #2: Added CODE-LEVEL enforcement:
+//   - Loop through positions before LLM sees them
+//   - Check pnl_pct vs TP/SL thresholds
+//   - Check age vs maxHoldMinutes
+//   - Check active_bin vs upper_bin
+//   - Auto-mark for CLOSE via setPositionInstruction
+// NOW: Exit rules are enforced by CODE, not just LLM prompt
+
+// 2026-03-29 12:07 UTC - EMOTIONAL CHECKPOINT
+// GE has been struggling for 5 days with no profit
+// Bot has been making mistakes: wrong pools, not following rules
+// NOW: All fixes are in place:
+//   - Deploy: HARD CHECK for v2 criteria
+//   - Exit: CODE-LEVEL enforcement for TP/SL/MaxHold
+//   - Management: every 3 min
+// PRAY THIS WORKS - GE deserves a win
+
+// 2026-03-29 13:05 UTC - REMOVED SELF-TUNING
+// GE frustrated - bot keeps self-tuning v2 rules without permission
+// FIX: Commented out /evolve command entirely
+// Config is now LOCKED - no more self-tuning allowed
+// Bot will follow EXACTLY what GE sets in user-config.json
+
+// 2026-03-29 13:18 UTC - V2 STRATEGY LOCK STRENGTHENED
+// GE wants to make ABSOLUTELY SURE bot never changes v2 rules
+// NEW: Added V2_STRATEGY_LOCK in config.js that:
+//   - Protects ALL v2 parameters
+//   - Rejects any attempted changes with console warning
+//   - Auto-corrects any deviation back to v2 values
+// Bot will NOW fight back against any attempt to modify v2 rules
+
+// 2026-03-29 15:09 UTC - STOPPED FOR CRITICAL FIX
+// ISSUE: Bot buying MOODENG via Jupiter swap - violates v2 rules
+// FIX #1: Added MOODENG (ED5nyyWEzpPPiWimP8vYm7sD7TD3LAt3Q3gRTWHzPJBY) to HARDCODED_BLACKLIST
+// FIX #2: Made swap_token HARD DENY ALL by default - only allow swaps for position creation or fee claim
+// v2 STRATEGY: UNCHANGED - still locked as GE specified
+
+// 2026-04-02 20:53 UTC - V2 STRATEGY COMPLETE & LOCKED
+// COMPLETED ALL GE REQUESTS:
+// 1. Config: maxMcap $7.5M, minVolume5m $1000
+// 2. Auto-swap threshold: $0.01 (from $0.10 - was leaving residual tokens)
+// 3. Hard-coded exit rules: STOP LOSS -15%, TAKE PROFIT +5%, MAX HOLD 15min, OOR IMMEDIATE EXIT
+// 4. Pool Alert Bot: Updated to V2 filters, fixed field mappings (avg_volume, dlmm_params.bin_step)
+// 5. deployer-blacklist.js: Fixed import path "../logger.js"
+// 6. V2 Strategy: SPOT ONLY (0/0 bins), HARD FORCED 2 SOL, management 1 min
+// STATUS: Bot running, Pool Alert running, Balance 4.18 SOL, 0 positions
+// GE Philosophy: "Hit-and-run = exit early, speed over perfect timing"
+

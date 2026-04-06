@@ -10,6 +10,12 @@ import { log } from "./logger.js";
 
 const BLACKLIST_FILE = "./token-blacklist.json";
 
+// HARDCODED blacklist - cannot be bypassed
+const HARDCODED_TOKEN_BLACKLIST = [
+  // ZEN token - SCAMMER (GE request 2026-04-01)
+  "3tXvLBVojpviB13khqqsV4f7uh51Gy8m5q39eXJCpump",
+];
+
 function load() {
   if (!fs.existsSync(BLACKLIST_FILE)) return {};
   try {
@@ -31,6 +37,13 @@ function save(data) {
  */
 export function isBlacklisted(mint) {
   if (!mint) return false;
+  
+  // Check HARDCODED blacklist first (cannot be bypassed)
+  if (HARDCODED_TOKEN_BLACKLIST.includes(mint)) {
+    return true;
+  }
+  
+  // Check runtime blacklist
   const db = load();
   return !!db[mint];
 }

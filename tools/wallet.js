@@ -12,6 +12,23 @@ import { config } from "../config.js";
 let _connection = null;
 let _wallet = null;
 
+// Backup RPC if primary fails
+const PRIMARY_RPC = process.env.RPC_URL;
+const BACKUP_RPC = process.env.RPC_URL_FALLBACK || "https://mainnet.helius-rpc.com/?api-key=f4b348ad-4924-4274-ab8b-13f0d74bcb0b";
+
+async function getConnectionWithFallback() {
+  try {
+    const conn = new Connection(PRIMARY_RPC, "confirmed");
+    // Quick test
+    await conn.getSlot();
+    return conn;
+  } catch(e) {
+    log("rpc", `Primary RPC failed: ${e.message}, trying backup...`);
+    const conn = new Connection(BACKUP_RPC, "confirmed");
+    return conn;
+  }
+}
+
 function getConnection() {
   if (!_connection) _connection = new Connection(process.env.RPC_URL, "confirmed");
   return _connection;

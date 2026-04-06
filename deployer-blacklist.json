@@ -1,4 +1,149 @@
 {
-  "_note": "Known farm/rug deployers. Add deployer wallet addresses here to auto-reject their pools. Seed with list from @degengamblah.",
-  "addresses": []
+  "blocked_deployers": {
+    "bwamJzztZsepfkteWRChggmXuiiCQvpLqPietdNfSXa": {
+      "symbol": "BLOCKED-DEPLOYER-01",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "whamNNP9tHoxLg92yHvJPdYhghEoCg1qYTsh5a2oLbx": {
+      "symbol": "BLOCKED-DEPLOYER-02",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "D9gQ6RhKEpnobPBUdWY5bPQt2p3zGk3iVz6ChpUi2ArA": {
+      "symbol": "BLOCKED-DEPLOYER-03",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "AMRsSeU5JpqwQWJGNLMpZzRCZSFEwYQYbMnms3dD4311": {
+      "symbol": "BLOCKED-DEPLOYER-04",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "5FqUo9aBjsp7QeeyN6Vi2ZmF2fjS4H5EU7wnAQwPy17z": {
+      "symbol": "BLOCKED-DEPLOYER-05",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "HiSo5kykqDPs3EG14Fk9QY4B5RvkuEs8oJTiqPX3EDAn": {
+      "symbol": "BLOCKED-DEPLOYER-06",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "8HeDT75s5g4CtCimH5B5nySqCiQhtWii2UnZhxBtFo38": {
+      "symbol": "BLOCKED-DEPLOYER-07",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "HTM87R4mgjDdiF6Yfn8duK9vbDmZxiPCTRbGvm7eCAJY": {
+      "symbol": "BLOCKED-DEPLOYER-08",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "dtrzJPj7yDdvm6eRqBAgxsK2sMJeD9HhBEBB3XMedXy": {
+      "symbol": "BLOCKED-DEPLOYER-09",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "8i5U2uNBEuTc4zskYP14zbebDg2RSwrrG8REhEnJb97K": {
+      "symbol": "BLOCKED-DEPLOYER-10",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "9wRuFPJZFviuHv9q4hsaxUUADDphX6oSjcMA3RuxTFRG": {
+      "symbol": "BLOCKED-DEPLOYER-11",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "D6bTtoSgLknJ9KrgDFUtB5WpqomrNEjBJipVVRoFh2DC": {
+      "symbol": "BLOCKED-DEPLOYER-12",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "Aqje5DsN4u2PHmQxGF9PKfpsDGwQRCBhWeLKHCFhSMXk": {
+      "symbol": "BLOCKED-DEPLOYER-13",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "6nU2L7MQVUWjtdKHVpuZA9aind73nd3rXC4YFo8KQCy4": {
+      "symbol": "BLOCKED-DEPLOYER-14",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "95ZCf3jKMHeFYvPXVZW3Ek6AEPDyjebosqnc7eNioVMo": {
+      "symbol": "BLOCKED-DEPLOYER-15",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "8NJ7Ujpji8uMF2675mqaTSEm2DCbfJA7fiRKtiaqkaLN": {
+      "symbol": "BLOCKED-DEPLOYER-16",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "A8Z1ejQGk45EJibBPJviWnM3UvwKSuYun53nSCkWKM52": {
+      "symbol": "BLOCKED-DEPLOYER-17",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "Dwo2kj88YYhwcFJiybTjXezR9a6QjkMASz5xXD7kujXC": {
+      "symbol": "BLOCKED-DEPLOYER-18",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "69aiAKU3uJMxMLRkUEGFNt6nQ43PiVimE4ZbErJ7VSM1": {
+      "symbol": "BLOCKED-DEPLOYER-19",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "7moqFjvm2MwAiMtCZoqYoTAPzRBxxMRT2ddyHThQuWjr": {
+      "symbol": "BLOCKED-DEPLOYER-20",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "FaBGrHWjcJ8vKnbgUtsdpZjvF7YAAajtQTWmmEHiKtQr": {
+      "symbol": "BLOCKED-DEPLOYER-21",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "7GhWwhaMgbKiRWxF93Bud6HnHMci6NCLTJyTxG8zFH51": {
+      "symbol": "BLOCKED-DEPLOYER-22",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "Xh2Y84WN8t3ZEKbwkDRT1ap5thJUAf3Ndv44wbbEXxX": {
+      "symbol": "BLOCKED-DEPLOYER-23",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "75GMVrr2xfgAeybuNg1VMHqFE3GTFJLzEHo6xC4MwUzF": {
+      "symbol": "BLOCKED-DEPLOYER-24",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "23QuARJvRDKYy7c9QM8NCVZJSBKy3EALUkzSvf5Gft3U": {
+      "symbol": "BLOCKED-DEPLOYER-25",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "3z5FDHPFQTDo2GYpDZT7XCbSVY9q1ehr7T6Gzuu4UMyx": {
+      "symbol": "BLOCKED-DEPLOYER-26",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "FM1YCKED2KaqB8Uat8aB1nsffR1vezr7s6FAEieXJgke": {
+      "symbol": "BLOCKED-DEPLOYER-27",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "2b2N2p7xCS9ibDqxwYgXpDSTniJwwye7n93WYuzmr74s": {
+      "symbol": "BLOCKED-DEPLOYER-28",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    },
+    "6ujZxnphRxTqveaQtLAQHFoWz16xhLWZbTijcgZN4fRp": {
+      "symbol": "BLOCKED-DEPLOYER-29",
+      "reason": "GE REQUEST - Block all suspicious deployers",
+      "added_at": "2026-04-02T18:56:00.000Z"
+    }
+  }
 }

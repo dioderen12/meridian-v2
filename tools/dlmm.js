@@ -107,9 +107,24 @@ export async function deployPosition({
   fee_tvl_ratio,
   organic_score,
   initial_value_usd,
+  volume_5m, // 5-minute volume for adaptive strategy
 }) {
   pool_address = normalizeMint(pool_address);
-  const activeStrategy = strategy || config.strategy.strategy;
+  
+  // ⚠️ HARDCODED: SPOT ONLY - GE confirmed 2026-04-02
+  // BID-ASK and RANGE completely disabled
+  const strategyMode = "fixed_spot"; // FORCED - no override allowed
+  
+  let activeStrategy;
+  if (strategyMode === "fixed_spot") {
+    // Always use SPOT single bin
+    activeStrategy = "spot";
+    log("deploy", `SPOT FORCED (BID-ASK/RANGE disabled) - ${activeStrategy}`);
+  } else {
+    // Fallback (should never hit)
+    activeStrategy = "spot";
+    log("deploy", `Fallback to SPOT: ${activeStrategy}`);
+  }
 
   const activeBinsBelow = bins_below ?? config.strategy.binsBelow;
   const activeBinsAbove = bins_above ?? 0;

@@ -19,6 +19,7 @@ strategy-library.json
 
 # Logs
 logs/
+*.log
 
 # OS
 .DS_Store
@@ -34,3 +35,34 @@ discord-signals.json
 
 # Claude Code runtime lock
 .claude/scheduled_tasks.lock
+
+# Daily tracking
+daily-pnl.json
+daily-tracker.js
+daily-tracker.mjs
+
+# Emergency files
+emergency-stop.mjs
+emergency-stop.sh
+
+# Enhanced modules (user-specific)
+enhanced-*.js
+
+# Loss tracking
+loss-analysis.mjs
+loss-history.json
+
+# Pool blacklist
+pool-blacklist.js
+pool-blacklist.json
+
+# Old/backups
+*.bak
+*OLD*.json
+*BACKUP*.json
+strategy-v1.json
+strategy-v2-active.json
+
+# Status
+status.sh
+monitoring-log.json

@@ -55,6 +55,8 @@ export function recordPoolDeploy(poolAddress, deployData) {
       deploys: [],
       total_deploys: 0,
       avg_pnl_pct: 0,
+      avg_tir_pct: 100,
+      last_tir_pct: null,
       win_rate: 0,
       last_deployed_at: null,
       last_outcome: null,
@@ -74,7 +76,11 @@ export function recordPoolDeploy(poolAddress, deployData) {
     close_reason: deployData.close_reason || null,
     strategy: deployData.strategy || null,
     volatility_at_deploy: deployData.volatility ?? null,
+    tir_pct: deployData.tir_pct ?? deployData.range_efficiency ?? null,
   };
+
+  // Defensive: ensure deploys is array
+  if (!Array.isArray(entry.deploys)) entry.deploys = [];
 
   entry.deploys.push(deploy);
   entry.total_deploys = entry.deploys.length;
@@ -90,6 +96,15 @@ export function recordPoolDeploy(poolAddress, deployData) {
     entry.win_rate = Math.round(
       (withPnl.filter((d) => d.pnl_pct >= 0).length / withPnl.length) * 100
     ) / 100;
+  }
+
+  // Recompute TIR aggregates
+  const withTir = entry.deploys.filter((d) => d.tir_pct != null);
+  if (withTir.length > 0) {
+    entry.avg_tir_pct = Math.round(
+      (withTir.reduce((s, d) => s + d.tir_pct, 0) / withTir.length) * 100
+    ) / 100;
+    entry.last_tir_pct = withTir[withTir.length - 1].tir_pct;
   }
 
   if (deployData.base_mint && !entry.base_mint) {
@@ -151,6 +166,8 @@ export function recordPositionSnapshot(poolAddress, snapshot) {
       deploys: [],
       total_deploys: 0,
       avg_pnl_pct: 0,
+      avg_tir_pct: 100,
+      last_tir_pct: null,
       win_rate: 0,
       last_deployed_at: null,
       last_outcome: null,
@@ -235,6 +252,8 @@ export function addPoolNote({ pool_address, note }) {
       deploys: [],
       total_deploys: 0,
       avg_pnl_pct: 0,
+      avg_tir_pct: 100,
+      last_tir_pct: null,
       win_rate: 0,
       last_deployed_at: null,
       last_outcome: null,

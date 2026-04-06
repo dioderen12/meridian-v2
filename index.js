@@ -14,6 +14,11 @@ import { generateBriefing } from "./briefing.js";
 import { getLastBriefingDate, setLastBriefingDate, getTrackedPosition, setPositionInstruction } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { recordPositionSnapshot, recallForPool } from "./pool-memory.js";
+import { isEmergencyStop, emergencyStop, clearEmergencyStop } from './emergency-stop.mjs';
+import { getHealthStatus } from './tools/health-check.js';
+import { startTIRTracking, updateTIRCheck, getTIRStats, clearTIRPosition } from './tools/time-in-range.mjs';
+import { autoAddLesson, checkAutoBlacklist, addTIRLesson, autoBlacklistBigLoss, analyzeWinPattern, addWinLesson } from "./tools/auto-lesson.mjs";
+import { isPoolBlacklisted } from "./pool-blacklist.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import { getTokenHolders, getTokenNarrative, getTokenInfo } from "./tools/token.js";
 
@@ -43,6 +48,78 @@ function formatCountdown(seconds) {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+// Helper: Generate ALL lessons on close (TIR + Win Pattern + Exit Reason)
+async function generateAllLessons({ poolAddress, pair, pnl_pct, age, reason, tirStats, closeResult }) {
+  // 1. TIR Lesson (always)
+  try {
+    await addTIRLesson({ pool: poolAddress, pnl: pnl_pct, tirStats });
+  } catch(e) { log("error", `TIR lesson failed: ${e.message}`); }
+  
+  // 2. Win Pattern Lesson (only for wins)
+  if (pnl_pct >= 0) {
+    try {
+      const inRangePercent = tirStats ? parseFloat(tirStats.inRangePercent) : 100;
+      const patterns = await analyzeWinPattern({ 
+        pnl: pnl_pct, 
+        age, 
+        feeEarned: closeResult?.fees_earned_usd || 0,
+        poolStats: null,
+        entryPrice: null,
+        exitPrice: null,
+        inRangePercent 
+      });
+      if (patterns.length > 0) {
+        await addWinLesson({ pool: poolAddress, pnl: pnl_pct, age, feeEarned: closeResult?.fees_earned_usd || 0 }, patterns);
+      }
+    } catch(e) { log("error", `Win pattern lesson failed: ${e.message}`); }
+  }
+  
+  // 3. Exit Reason Lesson (always)
+  try {
+    await autoAddLesson({ reason, poolAddress, pair, pnl: pnl_pct, age, poolStats: null });
+  } catch(e) { log("error", `Auto-lesson failed: ${e.message}`); }
+}
+
+// Helper: Force swap tokens to SOL - ROBUST VERSION (HARDCODED)
+// Runs after EVERY position close - NO EXCEPTIONS
+async function forceSwapTokens(closeResult) {
+  try {
+    const { getWalletBalances, swapToken } = await import("./tools/wallet.js");
+    const balances = await getWalletBalances({});
+    const SOL_MINT = 'So11111111111111111111111111111111111111112';
+    
+    // PRIMARY: Swap base_mint token from pool close (if closeResult exists)
+    if (closeResult && closeResult.base_mint && closeResult.base_mint !== SOL_MINT) {
+      const token = balances.tokens?.find(t => t.mint === closeResult.base_mint);
+      if (token && token.balance > 0) {
+        log("management", `🔄 FORCE SWAP: ${token.symbol} (${token.balance}, ~$${token.usd.toFixed(2)}) → SOL`);
+        await swapToken({ input_mint: closeResult.base_mint, output_mint: SOL_MINT, amount: token.balance, _internal: true });
+        log("management", `✅ SWAP SUCCESS: ${token.symbol} → SOL`);
+      }
+    }
+    
+    // FALLBACK 1: Swap ALL non-SOL tokens >= $0.001
+    for (const token of balances.tokens || []) {
+      if (token.mint !== SOL_MINT && token.balance > 0 && token.usd >= 0.001) {
+        log("management", `🔄 SWEEP: ${token.symbol} (${token.balance}, ~$${token.usd.toFixed(2)}) → SOL`);
+        await swapToken({ input_mint: token.mint, output_mint: SOL_MINT, amount: token.balance, _internal: true });
+        log("management", `✅ SWEEP SUCCESS: ${token.symbol} → SOL`);
+      }
+    }
+    
+    // FALLBACK 2: LAST RESORT - any non-SOL >= $0.0001
+    for (const token of balances.tokens || []) {
+      if (token.mint !== SOL_MINT && token.balance > 0 && token.usd >= 0.0001) {
+        log("management", `🔄 DUST: ${token.symbol} (${token.balance}, ~$${token.usd.toFixed(4)}) → SOL`);
+        await swapToken({ input_mint: token.mint, output_mint: SOL_MINT, amount: token.balance, _internal: true });
+        log("management", `✅ DUST SWAP SUCCESS: ${token.symbol} → SOL`);
+      }
+    }
+  } catch(e) {
+    log("management_warn", `Force swap failed: ${e.message}`);
+  }
 }
 
 function buildPrompt() {
@@ -101,25 +178,27 @@ export async function runManagementCycle({ silent = false } = {}) {
   let mgmtReport = null;
   let positions = [];
   try {
+      // Import loss analysis
+      const { addLoss } = await import('./loss-analysis.mjs');
       // Pre-load all positions + PnL in parallel — LLM gets everything, no fetch steps needed
       const livePositions = await getMyPositions().catch(() => null);
       positions = livePositions?.positions || [];
 
       if (positions.length === 0) {
+        // Check emergency stop first
+        if (isEmergencyStop()) {
+          log("cron", "🚨 EMERGENCY STOP ACTIVE - screening disabled");
+          return;
+        }
         log("cron", "No open positions — triggering screening cycle");
         runScreeningCycle().catch((e) => log("cron_error", `Triggered screening failed: ${e.message}`));
         return;
       }
 
-      // Enforce management interval based on most volatile open position
-      const maxVolatility = positions.reduce((max, p) => {
-        const tracked = getTrackedPosition(p.position);
-        return Math.max(max, tracked?.volatility ?? 0);
-      }, 0);
-      const targetInterval = maxVolatility >= 5 ? 3 : maxVolatility >= 2 ? 5 : 10;
-      if (config.schedule.managementIntervalMin !== targetInterval) {
-        config.schedule.managementIntervalMin = targetInterval;
-        log("cron", `Management interval adjusted to ${targetInterval}m (max volatility: ${maxVolatility})`);
+      // 🚨 HARD-CODED: Always use 1-min management interval for precise 15-min hard exit
+      // DO NOT override this - it's critical for max hold enforcement
+      if (config.schedule.managementIntervalMin !== 1) {
+        config.schedule.managementIntervalMin = 1;
         if (cronStarted) startCronJobs();
       }
 
@@ -138,6 +217,117 @@ export async function runManagementCycle({ silent = false } = {}) {
         const recall = recallForPool(p.pool);
         return { ...p, pnl, recall };
       }));
+
+      // 🚨 CODE-LEVEL EXIT ENFORCEMENT (v2 Strategy Rules)
+      // These rules are NON-NEGOTIABLE - enforced by code, not LLM
+      for (const pos of positionData) {
+        if (!pos.pnl) continue;
+        
+        const pnl_pct = pos.pnl.pnl_pct || 0;
+        const pnl_usd = pos.pnl.pnl_usd || 0;
+        const deployedAt = pos.deployed_at || pos.pnl?.deployed_at || 0;
+        const ageMs = deployedAt ? (Date.now() - new Date(deployedAt).getTime()) : 0;
+        const age = ageMs > 0 ? Math.floor(ageMs / 60000) : (pos.pnl?.age_minutes || 0);
+        const active_bin = pos.pnl.active_bin || 0;
+        const upper_bin = pos.pnl.upper_bin || 0;
+        const lower_bin = pos.pnl.lower_bin || 0;
+        
+        // Rule 1: STOP LOSS -5% - IMMEDIATE CLOSE (V2 STRATEGY)
+        if (pnl_pct <= -5) {
+          log("management", `🚨🚨 STOP LOSS CLOSE: ${pos.pair} pnl ${pnl_pct}% <= -5% — FORCED EXIT!`);
+          setPositionInstruction(pos.position, "CLOSE", "stop_loss");
+          try {
+            const closeResult = await closePosition({ position_address: pos.position });
+            log("management", `✅ Stop loss close completed: base_mint=${closeResult?.base_mint}, pnl_usd=${closeResult?.pnl_usd}`);
+            // Track daily PnL
+            if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
+              const { addToDailyPnL } = await import('./daily-tracker.mjs');
+              const result = addToDailyPnL(closeResult.pnl_usd);
+              log("management", `📊 Daily PnL: $${result.pnl.toFixed(2)} (${result.trades} trades)`);
+              if (result.limitHit) log("management", `🚨 DAILY LIMIT HIT: ${result.limitHit}`);
+            }
+            // 🚨 IMMEDIATE FORCE SWAP: Convert tokens to SOL
+            await forceSwapTokens(closeResult);
+          } catch(e) { log("error", `Stop loss close failed: ${e.message}`); }
+          // Generate all lessons (TIR + Win Pattern + Exit Reason)
+          generateAllLessons({ poolAddress: pos.pool, pair: pos.pair, pnl_pct, age, reason: 'stop_loss', tirStats: pos.tirStats, closeResult }).catch(e => log("error", `Lessons failed: ${e.message}`));
+          if (pnl_pct < -20) autoBlacklistBigLoss(pos.pool, pos.pair, pnl_pct);
+          try { checkAutoBlacklist({ reason: 'stop_loss', poolAddress: pos.pool, pair: pos.pair, pnl: pnl_pct, age }); } catch(e) { log("error", `Auto-blacklist failed: ${e.message}`) };
+          // Track loss patterns
+          try { addLoss({ poolAddress: pos.pool, pair: pos.pair, pnl: pnl_pct, age, reason: 'stop_loss' }); } catch(e) { log("error", `Loss tracking failed: ${e.message}`) };
+        }
+        // Rule 2: TAKE PROFIT +10% - IMMEDIATE CLOSE (V2 STRATEGY)
+        // Exit early only if profit ≥10% — don't exit for less
+        // This ensures we take profit when available, not "sembarangan"
+        else if (pnl_pct >= 10) {
+          log("management", `🚨🚨 TAKE PROFIT CLOSE: ${pos.pair} pnl ${pnl_pct}% >= 10% — FORCED EXIT!`);
+          setPositionInstruction(pos.position, "CLOSE", "take_profit");
+          try {
+            const closeResult = await closePosition({ position_address: pos.position });
+            log("management", `✅ Take profit close completed: base_mint=${closeResult?.base_mint}, pnl_usd=${closeResult?.pnl_usd}`);
+            // Track daily PnL
+            if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
+              const { addToDailyPnL } = await import('./daily-tracker.mjs');
+              const result = addToDailyPnL(closeResult.pnl_usd);
+              log("management", `📊 Daily PnL: $${result.pnl.toFixed(2)} (${result.trades} trades)`);
+              if (result.limitHit) log("management", `🚨 DAILY LIMIT HIT: ${result.limitHit}`);
+            }
+            // 🚨 IMMEDIATE FORCE SWAP: Convert tokens to SOL
+            await forceSwapTokens(closeResult);
+          } catch(e) { log("error", `Take profit close failed: ${e.message}`); }
+          // Generate all lessons (TIR + Win Pattern + Exit Reason)
+          generateAllLessons({ poolAddress: pos.pool, pair: pos.pair, pnl_pct, age, reason: 'take_profit', tirStats: pos.tirStats, closeResult }).catch(e => log("error", `Lessons failed: ${e.message}`));
+          // Track profit (positive learning)
+          try { addLoss({ poolAddress: pos.pool, pair: pos.pair, pnl: pnl_pct, age, reason: 'take_profit' }); } catch(e) { log("error", `Profit tracking failed: ${e.message}`) };
+        }
+        // Rule 3: MAX HOLD 15 min — ALWAYS EXIT at exactly 15 min (HARD LOCKED)
+        // No exceptions, no extensions — PnL doesn't matter, time is the trigger
+        else if (age >= 15) {
+          // 🚨 HARD RULE: 15 min = FORCED EXIT regardless of PnL
+          log("management", `⏰⏰⏰ MAX HOLD 15min REACHED: ${pos.pair} pnl ${pnl_pct}% — FORCED EXIT!`);
+          setPositionInstruction(pos.position, "CLOSE", "max_hold_15min");
+          try {
+            const closeResult = await closePosition({ position_address: pos.position });
+            log("management", `✅ Max hold 10min close completed: base_mint=${closeResult?.base_mint}, pnl_usd=${closeResult?.pnl_usd}`);
+            // Track daily PnL
+            if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
+              const { addToDailyPnL } = await import('./daily-tracker.mjs');
+              const result = addToDailyPnL(closeResult.pnl_usd);
+              log("management", `📊 Daily PnL: $${result.pnl.toFixed(2)} (${result.trades} trades)`);
+              if (result.limitHit) log("management", `🚨 DAILY LIMIT HIT: ${result.limitHit}`);
+            }
+            // 🚨 IMMEDIATE FORCE SWAP: Convert tokens to SOL
+            await forceSwapTokens(closeResult);
+          } catch(e) { log("error", `Max hold close failed: ${e.message}`); }
+          // Generate all lessons (TIR + Win Pattern + Exit Reason)
+          generateAllLessons({ poolAddress: pos.pool, pair: pos.pair, pnl_pct, age, reason: 'max_hold', tirStats: pos.tirStats, closeResult }).catch(e => log("error", `Lessons failed: ${e.message}`));
+          try { addLoss({ poolAddress: pos.pool, pair: pos.pair, pnl: pnl_pct, age, reason: 'max_hold' }); } catch(e) { log("error", `Loss tracking failed: ${e.message}`) };
+        }
+        // Rule 4: OUT OF RANGE - IMMEDIATE EXIT (both pumped and dropped)
+        else if (!pos.in_range) {
+          const oorType = active_bin > upper_bin ? "PUMPED" : "DROPPED";
+          log("management", `🚨🚨 OOR CLOSE (IMMEDIATE): ${pos.pair} active_bin ${active_bin} ${oorType === "PUMPED" ? ">" : "<"} ${oorType === "PUMPED" ? "upper" : "lower"}_bin — FORCED EXIT!`);
+          setPositionInstruction(pos.position, "CLOSE", "oor");
+          let closeResult = null;
+          try {
+            closeResult = await closePosition({ position_address: pos.position });
+            log("management", `✅ OOR close completed: base_mint=${closeResult?.base_mint}, pnl_usd=${closeResult?.pnl_usd}`);
+            // Track daily PnL
+            if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
+              const { addToDailyPnL } = await import('./daily-tracker.mjs');
+              const result = addToDailyPnL(closeResult.pnl_usd);
+              log("management", `📊 Daily PnL: $${result.pnl.toFixed(2)} (${result.trades} trades)`);
+              if (result.limitHit) log("management", `🚨 DAILY LIMIT HIT: ${result.limitHit}`);
+            }
+            // 🚨 IMMEDIATE FORCE SWAP: Convert tokens to SOL
+            await forceSwapTokens(closeResult);
+          } catch(e) { log("error", `OOR close failed: ${e.message}`); }
+          // Generate all lessons (TIR + Win Pattern + Exit Reason)
+          generateAllLessons({ poolAddress: pos.pool, pair: pos.pair, pnl_pct, age, reason: 'oor', tirStats: pos.tirStats, closeResult }).catch(e => log("error", `Lessons failed: ${e.message}`));
+          try { addLoss({ poolAddress: pos.pool, pair: pos.pair, pnl: pnl_pct, age, reason: 'oor' }); } catch(e) { log("error", `Loss tracking failed: ${e.message}`) };
+          try { checkAutoBlacklist({ reason: 'oor', poolAddress: pos.pool, pair: pos.pair, pnl: pnl_pct, age }); } catch(e) { log("error", `Auto-blacklist failed: ${e.message}`) };
+        }
+      }
 
       // Build pre-loaded position blocks for the LLM
       const positionBlocks = positionData.map((p) => {
@@ -257,6 +447,10 @@ export async function runScreeningCycle({ silent = false } = {}) {
       // Pre-load top candidates + all recon data in parallel (saves 4-6 LLM steps)
       const topCandidates = await getTopCandidates({ limit: 5 }).catch(() => null);
       const candidates = topCandidates?.candidates || topCandidates?.pools || [];
+      
+      // Load loss patterns for screening decision
+      const { getLossAnalysisForPrompt } = await import('./loss-analysis.mjs');
+      const lossPatterns = getLossAnalysisForPrompt();
 
       const candidateBlocks = [];
       for (const pool of candidates.slice(0, 5)) {
@@ -322,32 +516,46 @@ export async function runScreeningCycle({ silent = false } = {}) {
         }
       } catch { /* hive is best-effort */ }
 
-      const { content } = await agentLoop(`
-SCREENING CYCLE
-${strategyBlock}
-Positions: ${prePositions.total_positions}/${config.risk.maxPositions} | SOL: ${currentBalance.sol.toFixed(3)} | Deploy: ${deployAmount} SOL
-${candidateContext}
-DECISION RULES:
-- HARD SKIP if fees < ${config.screening.minTokenFeesSol} SOL (bundled/scam)
-- HARD SKIP if top10 > ${config.screening.maxTop10Pct}% OR bots > ${config.screening.maxBundlersPct}%
-${config.screening.blockedLaunchpads.length ? `- HARD SKIP if launchpad is any of: ${config.screening.blockedLaunchpads.join(", ")}` : ""}
-- SKIP if narrative is empty/null or pure hype with no specific story (unless smart wallets present)
-- Bots 5–25% are normal, not a skip reason on their own
-- Smart wallets present → strong confidence boost
-
-STEPS:
-1. Pick the best candidate based on narrative quality, smart wallets, and pool metrics.
-2. Call deploy_position (active_bin is pre-fetched above — no need to call get_active_bin).
-   bins_below = round(35 + (volatility/5)*55) clamped to [35,90].
-3. Report in this exact format (no tables, no extra sections):
-   Deployed: PAIR
-   bin_step=X | fee=X% | bots=X% | top10=X% | fees=XSOL
-   range=minPrice→maxPrice (downside=(minPrice/maxPrice-1)*100%)
-   smart_wallets=name1,name2 (or none)
-   narrative: <one sentence>
-   reason: <one sentence why picked over others>
-      `, config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel, 2048);
-      screenReport = content;
+      // AUTO-DEPLOY: Direct deploy without LLM gate
+      let screenReport = lossPatterns ? '⚠️ LOSS PATTERNS:\n' + lossPatterns + '\n' : '';
+      
+      // Check daily limits before deploying
+      const { canTrade, addToDailyPnL, getDailyPnL } = await import('./daily-tracker.mjs');
+      const dailyData = getDailyPnL();
+      
+      if (dailyData.limitHit) {
+        screenReport = 'DAILY LIMIT HIT: ' + dailyData.limitHit + ' (PnL: $' + dailyData.pnl.toFixed(2) + ') - No new trades today';
+        log('screening', 'DEPLOY BLOCKED: Daily limit hit - ' + dailyData.limitHit);
+      } else if (candidates.length === 0) {
+        screenReport = 'No eligible pools found.';
+      } else {
+        const pool = candidates[0];
+        const poolName = pool.name || 'unknown';
+        const poolAddr = pool.pool || pool.pool_address;
+        screenReport = 'AUTO-DEPLOY: Deploying to ' + poolName + '...';
+        
+        try {
+          const { executeTool } = await import('./tools/executor.js');
+          const deployResult = await executeTool('deploy_position', {
+            pool_address: poolAddr,
+            amount_sol: deployAmount,
+            amount_y: deployAmount,
+            amount_x: 0,
+          }).catch(e => ({ error: e.message }));
+          
+          if (deployResult?.blocked) {
+            screenReport = 'BLOCKED: ' + deployResult.reason;
+          } else if (deployResult?.error) {
+            screenReport = 'ERROR: ' + deployResult.error;
+          } else {
+            screenReport = 'DEPLOYED: ' + poolName + ' at ' + deployAmount + ' SOL';
+            log('screening', 'AUTO-DEPLOY SUCCESS: ' + poolName + ' -> ' + poolAddr);
+          }
+        } catch(e) {
+          screenReport = 'EXCEPTION: ' + e.message;
+          log('screening', 'AUTO-DEPLOY FAILED: ' + e.message);
+        }
+      }
     } catch (error) {
       log("cron_error", `Screening cycle failed: ${error.message}`);
       screenReport = `Screening cycle failed: ${error.message}`;
@@ -839,6 +1047,13 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
   maybeRunMissedBriefing().catch(() => {});
   (async () => {
     try {
+      // 🚨 STARTUP CHECK: Verify any positions > 15 min are closed immediately
+      const livePositions = await getMyPositions().catch(() => null);
+      if (livePositions?.positions?.length > 0) {
+        log("startup", `Startup: Found ${livePositions.positions.length} open position(s) — running immediate management check`);
+        await runManagementCycle({ silent: true });
+      }
+      
       await agentLoop(`
 STARTUP CHECK
 1. get_wallet_balance. 2. get_my_positions. 3. If SOL >= ${config.management.minSolToOpen}: get_top_candidates then deploy ${DEPLOY} SOL. 4. Report.

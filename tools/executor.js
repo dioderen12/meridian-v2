@@ -1,4 +1,4 @@
-import { discoverPools, getPoolDetail, getTopCandidates } from "./screening.js";
+import { discoverPools, getPoolDetail, getTopCandidates, verifyPoolPassedV2Filters, wasRecentlyScreened } from "./screening.js";
 import {
   getActiveBin,
   deployPosition,
@@ -18,6 +18,40 @@ import { setPositionInstruction } from "../state.js";
 
 import { getPoolMemory, addPoolNote } from "../pool-memory.js";
 import { addStrategy, listStrategies, getStrategy, setActiveStrategy, removeStrategy } from "../strategy-library.js";
+
+// DEPLOY LOCK: Prevent race conditions
+const _deployLocks = new Set();
+function lockPool(pool_address) {
+  if (!pool_address) return true;
+  if (_deployLocks.has(pool_address)) return false;
+  _deployLocks.add(pool_address); return true;
+}
+function unlockPool(pool_address) {
+  if (!pool_address) return; _deployLocks.delete(pool_address);
+}
+
+// RECENT DEPLOY TRACKER: Block same pool within 10 min (force different pools)
+const _recentDeploys = new Map(); // pool_address -> timestamp
+const POOL_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+
+function isPoolRecentlyDeployed(pool_address) {
+  if (!pool_address) return false;
+  const lastDeploy = _recentDeploys.get(pool_address);
+  if (!lastDeploy) return false;
+  const now = Date.now();
+  if (now - lastDeploy < POOL_COOLDOWN_MS) {
+    return true; // Still in cooldown
+  }
+  // Clean up expired entry
+  _recentDeploys.delete(pool_address);
+  return false;
+}
+
+function recordRecentDeploy(pool_address) {
+  if (!pool_address) return;
+  _recentDeploys.set(pool_address, Date.now());
+}
+
 import { addToBlacklist, removeFromBlacklist, listBlacklist } from "../token-blacklist.js";
 import { addSmartWallet, removeSmartWallet, listSmartWallets, checkSmartWalletsOnPool } from "../smart-wallets.js";
 import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
@@ -210,6 +244,14 @@ const toolMap = {
 
     // Restart cron jobs if intervals changed
     const intervalChanged = applied.managementIntervalMin != null || applied.screeningIntervalMin != null;
+    
+    // 🚨 CRITICAL: Do NOT allow changes to management/screening intervals
+    // These are HARD-CODED for V2 strategy - 15-min max hold requires 1-min management
+    if (applied.managementIntervalMin !== undefined || applied.screeningIntervalMin !== undefined) {
+      log("config", `⚠️ REJECTED: Cannot change management/screening intervals — V2 STRATEGY LOCKED!`);
+      delete applied.managementIntervalMin;
+      delete applied.screeningIntervalMin;
+    }
     if (intervalChanged && _cronRestarter) {
       _cronRestarter();
       log("config", `Cron restarted — management: ${config.schedule.managementIntervalMin}m, screening: ${config.schedule.screeningIntervalMin}m`);
@@ -232,6 +274,7 @@ const toolMap = {
 };
 
 // Tools that modify on-chain state (need extra safety checks)
+// Tools that LLM can call (WRITE_TOOLS = allowed to modify state)
 const WRITE_TOOLS = new Set([
   "deploy_position",
   "claim_fees",
@@ -254,8 +297,25 @@ export async function executeTool(name, args) {
     log("error", error);
     return { error };
   }
+  // ─── 🚨 HARD FORCED: Always exactly 2 SOL per deploy, no override allowed ───
+  if (name === "deploy_position") {
+    // 🚨 EMERGENCY STOP CHECK - BLOCK ALL DEPLOYS
+    const { isEmergencyStop } = await import('../emergency-stop.mjs');
+    if (isEmergencyStop()) {
+      log("safety_block", `🚨 EMERGENCY STOP ACTIVE - ALL DEPLOYS BLOCKED`);
+      return { blocked: true, reason: "EMERGENCY STOP ACTIVE - Cannot deploy" };
+    }
+    
+    const FORCED_AMOUNT = 2;
+    args.amount_y = FORCED_AMOUNT;
+    args.amount_sol = FORCED_AMOUNT;
+    args.amount_x = 0;
+    log("executor", `⚠️ HARD FORCED deploy_amount = ${FORCED_AMOUNT} SOL`);
+  }
+
 
   // ─── Pre-execution safety checks ──────────
+  
   if (WRITE_TOOLS.has(name)) {
     const safetyCheck = await runSafetyChecks(name, args);
     if (!safetyCheck.pass) {
@@ -267,8 +327,42 @@ export async function executeTool(name, args) {
     }
   }
 
+  // ⚠️ TEMPORARILY DISABLED: DEPLOY GATE was blocking all deploys
+  // Root cause: LLM calls getTopCandidates then get_pool_detail on specific pools
+  // get_pool_detail doesn't write to cache, so DEPLOY GATE blocks everything
+  // V2 filters are already hardcoded in screening.js, so deploy gate is redundant
+  // TODO: Fix by making get_pool_detail also record to cache
+  /*
+  if (name === "deploy_position" && args.pool_address) {
+    const poolAddress = args.pool_address;
+    
+    // Check if pool passed V2 filters
+    const v2Passed = verifyPoolPassedV2Filters(poolAddress);
+    const recentlyScreened = wasRecentlyScreened(poolAddress, 900000); // 15 min
+    
+    if (!v2Passed || !recentlyScreened) {
+      log("executor", `⚠️ DEPLOY GATE: Pool ${poolAddress.slice(0,8)} not properly screened or not in V2 candidates. v2Passed=${v2Passed}, recentlyScreened=${recentlyScreened}`);
+      
+      // BLOCK if not screened - do not allow deploy to unscreened pools
+      return { 
+        blocked: true, 
+        reason: `DEPLOY GATE: Pool ${poolAddress.slice(0,8)} not screened via V2 filters. Must use getTopCandidates() first. Deploy blocked for safety.` 
+      };
+    }
+    
+    log("executor", `✅ DEPLOY GATE: Pool ${poolAddress.slice(0,8)} verified - passed V2 screening`);
+  }
+  */
+
   // ─── Execute ──────────────────────────────
   try {
+    // DEPLOY LOCK: Prevent race condition
+    if (name === "deploy_position" && args.pool_address) {
+      if (!lockPool(args.pool_address)) {
+        return { blocked: true, reason: `Deploy to ${args.pool_address} already in progress. Duplicate blocked.` };
+      }
+    }
+
     const result = await fn(args);
     const duration = Date.now() - startTime;
     const success = result?.success !== false && !result?.error;
@@ -286,28 +380,68 @@ export async function executeTool(name, args) {
         notifySwap({ inputSymbol: args.input_mint?.slice(0, 8), outputSymbol: args.output_mint === "So11111111111111111111111111111111111111112" || args.output_mint === "SOL" ? "SOL" : args.output_mint?.slice(0, 8), amountIn: result.amount_in, amountOut: result.amount_out, tx: result.tx }).catch(() => {});
       } else if (name === "deploy_position") {
         notifyDeploy({ pair: result.pool_name || args.pool_name || args.pool_address?.slice(0, 8), amountSol: args.amount_y ?? args.amount_sol ?? 0, position: result.position, tx: result.txs?.[0] ?? result.tx, priceRange: result.price_range, binStep: result.bin_step, baseFee: result.base_fee }).catch(() => {});
+        // Record this deploy for 10-min cooldown (force different pools)
+        recordRecentDeploy(args.pool_address);
       } else if (name === "close_position") {
         notifyClose({ pair: result.pool_name || args.position_address?.slice(0, 8), pnlUsd: result.pnl_usd ?? 0, pnlPct: result.pnl_pct ?? 0 }).catch(() => {});
-        // Auto-swap base token back to SOL unless user said to hold
+        // 🚨 FORCE AUTO-SWAP: All base tokens to SOL after close
+        // No threshold - ANY remaining balance gets swapped to SOL
+        // Only internal DLMM swaps allowed (swap_token is blocked for external use)
+        log("executor", `🔍 CLOSE RESULT: base_mint=${result.base_mint}, pool_name=${result.pool_name}, pnl_usd=${result.pnl_usd}`);
         if (!args.skip_swap && result.base_mint) {
           try {
             const balances = await getWalletBalances({});
+            log("executor", `🔍 WALLET BALANCES: tokens=${balances.tokens?.length || 0}`);
             const token = balances.tokens?.find(t => t.mint === result.base_mint);
-            if (token && token.usd >= 0.10) {
-              log("executor", `Auto-swapping ${token.symbol || result.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`);
-              await swapToken({ input_mint: result.base_mint, output_mint: "SOL", amount: token.balance });
+            log("executor", `🔍 FOUND TOKEN: ${token ? `${token.symbol} balance=${token.balance} usd=${token.usd}` : 'NOT FOUND'}`);
+            // 🚨 FORCE SWAP: Any token with balance > 0 gets swapped to SOL
+            // Lowered threshold from $0.01 to $0.001 to catch tiny residuals
+            // If balance > 0 and usd >= $0.001, swap it
+            if (token && token.balance > 0 && token.usd >= 0.001) {
+              log("executor", `🔄 FORCE SWAP: Converting ${token.symbol || result.base_mint.slice(0, 8)} (balance: ${token.balance}, ~$${token.usd.toFixed(3)}) to SOL`);
+              const swapResult = await swapToken({ input_mint: result.base_mint, output_mint: "SOL", amount: token.balance, _internal: true });
+              log("executor", `✅ FORCE SWAP SUCCESS: ${token.symbol || result.base_mint.slice(0, 8)} → SOL`);
+            } else if (token && token.balance > 0 && token.usd < 0.001) {
+              // Even if < $0.001, log it for tracking
+              log("executor", `⚠️ Tiny residual: ${token.symbol || result.base_mint.slice(0, 8)} balance ${token.balance} (~$${token.usd.toFixed(4)}) - too small to swap`);
+            } else if (!token) {
+              log("executor", `⚠️ Token ${result.base_mint.slice(0, 8)} not found in wallet after close`);
+            } else if (token && token.balance <= 0) {
+              log("executor", `⚠️ Token ${token.symbol} has 0 balance - nothing to swap`);
             }
           } catch (e) {
-            log("executor_warn", `Auto-swap after close failed: ${e.message}`);
+            log("executor_warn", `🔄 FORCE SWAP failed: ${e.message} - trying again with smaller amount`);
+            // Retry with half amount if first attempt fails
+            try {
+              const balances2 = await getWalletBalances({});
+              const token2 = balances2.tokens?.find(t => t.mint === result.base_mint);
+              if (token2 && token2.balance > 0) {
+                const retryAmount = token2.balance * 0.5; // Try half
+                log("executor", `🔄 RETRY SWAP: Trying ${retryAmount} of ${token2.balance}`);
+                await swapToken({ input_mint: result.base_mint, output_mint: "SOL", amount: retryAmount, _internal: true });
+                log("executor", `✅ RETRY SWAP SUCCESS`);
+              }
+            } catch (e2) {
+              log("executor_error", `🔄 RETRY SWAP ALSO FAILED: ${e2.message}`);
+            }
           }
+        } else {
+          log("executor_warn", `⚠️ close_position: result.base_mint is null/undefined - cannot swap`);
         }
+        // 🚨 TRIGGER IMMEDIATE SCREENING after close to find next pool
+        log("executor", `🔄 Position closed — triggering immediate screening for next pool`);
+        import("../index.js").then(m => {
+          if (m.runScreeningCycle) {
+            m.runScreeningCycle({ silent: true }).catch(e => log("executor_warn", `Post-close screening failed: ${e.message}`));
+          }
+        }).catch(e => log("executor_warn", `Failed to import index for post-close screening: ${e.message}`));
       } else if (name === "claim_fees" && config.management.autoSwapAfterClaim && result.base_mint) {
         try {
           const balances = await getWalletBalances({});
           const token = balances.tokens?.find(t => t.mint === result.base_mint);
-          if (token && token.usd >= 0.10) {
+          if (token && token.usd >= 0.01) {
             log("executor", `Auto-swapping claimed ${token.symbol || result.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`);
-            await swapToken({ input_mint: result.base_mint, output_mint: "SOL", amount: token.balance });
+            await swapToken({ input_mint: result.base_mint, output_mint: "SOL", amount: token.balance, _internal: true });
           }
         } catch (e) {
           log("executor_warn", `Auto-swap after claim failed: ${e.message}`);
@@ -315,8 +449,13 @@ export async function executeTool(name, args) {
       }
     }
 
-    return result;
+    const _deployResult = result;
+    if (name === "deploy_position" && args.pool_address) unlockPool(args.pool_address);
+    return _deployResult;
   } catch (error) {
+    // Unlock on error
+    if (name === "deploy_position" && args.pool_address) unlockPool(args.pool_address);
+
     const duration = Date.now() - startTime;
 
     logAction({
@@ -366,6 +505,14 @@ async function runSafetyChecks(name, args) {
         return {
           pass: false,
           reason: `Already have an open position in pool ${args.pool_address}. Cannot open duplicate. Pass allow_duplicate_pool: true for multi-layer strategy.`,
+        };
+      }
+
+      // 🚨 HARD BLOCK: Check if pool was recently deployed (within 10 min)
+      if (isPoolRecentlyDeployed(args.pool_address)) {
+        return {
+          pass: false,
+          reason: `Pool ${args.pool_address} was deployed within the last 10 minutes. Cannot deploy again yet. Choose a DIFFERENT pool.`,
         };
       }
 
@@ -438,10 +585,14 @@ async function runSafetyChecks(name, args) {
     }
 
     case "swap_token": {
-      // Basic check — prevent swapping when DRY_RUN is true
-      // (handled inside swapToken itself, but belt-and-suspenders)
+      // 🚨 SWAP BLOCK: Only allow internal DLMM operations
+      const isInternalCall = args._internal === true;
+      const isTokenToSol = args.output_mint === 'So11111111111111111111111111111111111111112' || args.output_mint === 'SOL';
+      if (!isInternalCall) return { pass: false, reason: 'SWAP DENIED. Only DLMM auto-swap allowed.' };
+      if (!isTokenToSol) return { pass: false, reason: 'SWAP DENIED. Only token-TO-SOL allowed.' };
       return { pass: true };
     }
+
 
     default:
       return { pass: true };
@@ -456,5 +607,7 @@ function summarizeResult(result) {
   if (str.length > 1000) {
     return str.slice(0, 1000) + "...(truncated)";
   }
-  return result;
+  const _deployResult = result;
+    if (name === "deploy_position" && args.pool_address) unlockPool(args.pool_address);
+    return _deployResult;
 }

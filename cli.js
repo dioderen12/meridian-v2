@@ -269,7 +269,40 @@ switch (subcommand) {
   // ── positions ────────────────────────────────────────────────────
   case "positions": {
     const { getMyPositions } = await import("./tools/dlmm.js");
-    out(await getMyPositions({ force: true }));
+    if (flags.enhanced || flags.e) {
+      // Enhanced formatted output
+      const pos = await getMyPositions({ force: true });
+      const positions = pos.positions || [];
+      
+      // Pool name mapping
+      const poolNames = {
+        'Eio6hAieGTAmKgfvbEfbnXke6o5kfEd74tqHm2Z9SFjf': 'JUP-SOL',
+        'HDhWhQCBrSh9xNWmNtsTi86eWj3yCoEiaRodjgNydo1b': 'cbBTC-SOL',
+        '7d51qGEeAKiPakkxLoHda9egShXQLJcjFYpHEcX4d3EM': 'Gameify-SOL',
+        '4NAwSqYY4gS18JtETDFXVMdfLwaoPxfKaZ2a59iSBzdL': 'AGENTS-SOL',
+        'Eb7iLX1YdqUfe6QiBrvqa6GFRavqshXmM63vbBPXCVPT': 'umi-SOL',
+      };
+      
+      console.log('╔══════════════════════════════════════════════════════════════════╗');
+      console.log('║  POSITIONS                                                    ║');
+      console.log('╠══════════════════════════════════════════════════════════════════╣');
+      console.log('║ # │ Pool              │ Ticker │ Value  │ PnL   │ Age     ║');
+      console.log('╠══════════════════════════════════════════════════════════════════╣');
+      
+      for (let i = 0; i < positions.length; i++) {
+        const p = positions[i];
+        const poolName = poolNames[p.pool] || p.pool?.slice(0, 12) || 'Unknown';
+        const ticker = poolName.split('-')[0];
+        const value = p.current_value_usd ? `$${p.current_value_usd.toFixed(2)}` : 'N/A';
+        const pnl = p.pnl_pct !== undefined ? (p.pnl_pct >= 0 ? `+${p.pnl_pct.toFixed(1)}%` : `${p.pnl_pct.toFixed(1)}%`) : 'N/A';
+        const age = p.age_minutes ? `${Math.floor(p.age_minutes / 60)}h` : 'N/A';
+        console.log(`║ ${i+1} │ ${poolName.padEnd(16)} │ ${ticker.padEnd(6)} │ ${value.padEnd(6)} │ ${pnl.padEnd(5)} │ ${age.padEnd(6)} ║`);
+      }
+      
+      console.log('╚══════════════════════════════════════════════════════════════════╝');
+    } else {
+      out(await getMyPositions({ force: true }));
+    }
     break;
   }
 
@@ -297,7 +330,41 @@ switch (subcommand) {
     const pnl = await getPositionPnl({ pool_address: poolAddress, position_address: positionAddress });
     if (tracked?.strategy) pnl.strategy = tracked.strategy;
     if (tracked?.instruction) pnl.instruction = tracked.instruction;
-    out(pnl);
+    
+    // Enhanced output
+    if (flags.enhanced || flags.e) {
+      const poolNames = {
+        'Eio6hAieGTAmKgfvbEfbnXke6o5kfEd74tqHm2Z9SFjf': 'JUP-SOL',
+        'HDhWhQCBrSh9xNWmNtsTi86eWj3yCoEiaRodjgNydo1b': 'cbBTC-SOL',
+        '7d51qGEeAKiPakkxLoHda9egShXQLJcjFYpHEcX4d3EM': 'Gameify-SOL',
+        '4NAwSqYY4gS18JtETDFXVMdfLwaoPxfKaZ2a59iSBzdL': 'AGENTS-SOL',
+        'Eb7iLX1YdqUfe6QiBrvqa6GFRavqshXmM63vbBPXCVPT': 'umi-SOL',
+      };
+      
+      const poolName = poolNames[poolAddress] || poolAddress?.slice(0, 12) || 'Unknown';
+      const ticker = poolName.split('-')[0];
+      const pnlUsd = pnl.pnl_usd !== undefined ? `$${pnl.pnl_usd.toFixed(4)}` : 'N/A';
+      const pnlPct = pnl.pnl_pct !== undefined ? (pnl.pnl_pct >= 0 ? `+${pnl.pnl_pct.toFixed(2)}%` : `${pnl.pnl_pct.toFixed(2)}%`) : 'N/A';
+      const value = pnl.current_value_usd !== undefined ? `$${pnl.current_value_usd.toFixed(2)}` : 'N/A';
+      const fees = pnl.all_time_fees_usd !== undefined ? `$${pnl.all_time_fees_usd.toFixed(4)}` : 'N/A';
+      const age = pnl.age_minutes ? `${Math.floor(pnl.age_minutes / 60)}h` : 'N/A';
+      const inRange = pnl.in_range ? '✅' : '❌';
+      
+      console.log('╔══════════════════════════════════════════════════════════════════╗');
+      console.log('║  PNL DETAILS                                                   ║');
+      console.log('╠══════════════════════════════════════════════════════════════════╣');
+      console.log(`║ Pool:     ${poolName.padEnd(47)}║`);
+      console.log(`║ Ticker:   ${ticker.padEnd(47)}║`);
+      console.log(`║ Value:    ${value.padEnd(47)}║`);
+      console.log(`║ PnL:      ${pnlPct.padEnd(47)}║`);
+      console.log(`║ PnL USD:  ${pnlUsd.padEnd(47)}║`);
+      console.log(`║ Fees:     ${fees.padEnd(47)}║`);
+      console.log(`║ Age:      ${age.padEnd(47)}║`);
+      console.log(`║ In Range: ${inRange.padEnd(47)}║`);
+      console.log('╚══════════════════════════════════════════════════════════════════╝');
+    } else {
+      out(pnl);
+    }
     break;
   }
 
@@ -665,6 +732,72 @@ switch (subcommand) {
       strategy: flags.strategy || "spot",
       single_sided_x: argv.includes("--single-sided-x"),
     }));
+    break;
+  }
+
+  // ── learn ──────────────────────────────────────────────────────
+  // Study top LPers from a specific pool or current candidates
+  case "learn": {
+    const { listLessons } = await import("./lessons.js");
+    const { studyTopLPers } = await import("./tools/study.js");
+    
+    if (flags.pool) {
+      // Study specific pool
+      try {
+        const result = await studyTopLPers({ pool_address: flags.pool, limit: 6 });
+        out({ studied_pool: flags.pool, result });
+      } catch(e) {
+        out({ error: e.message });
+      }
+    } else {
+      out({ message: "Use meridian learn --pool <addr> to study a specific pool" });
+    }
+    break;
+  }
+
+  // ── thresholds ──────────────────────────────────────────────────
+  // Show current screening thresholds with performance stats
+  case "thresholds": {
+    const { config } = await import("./config.js");
+    const { listLessons } = await import("./lessons.js");
+    const fs2 = await import("fs");
+    
+    let perfData = [];
+    try {
+      const lessonsData = JSON.parse(fs2.readFileSync("./lessons.json", "utf8"));
+      perfData = lessonsData.performance || [];
+    } catch { }
+    
+    const total = perfData.length;
+    const wins = perfData.filter(p => p.pnl_pct > 0).length;
+    const losses = perfData.filter(p => p.pnl_pct < 0).length;
+    const avgPnl = total > 0 ? perfData.reduce((sum, p) => sum + (p.pnl_pct || 0), 0) / total : 0;
+    
+    const s = config.screening || {};
+    out({ 
+      screening_thresholds: {
+        minFeeActiveTvlRatio: s.minFeeActiveTvlRatio,
+        minTvl: s.minTvl,
+        maxTvl: s.maxTvl,
+        minOrganic: s.minOrganic,
+        minHolders: s.minHolders,
+        minMcap: s.minMcap,
+        maxMcap: s.maxMcap,
+        timeframe: s.timeframe,
+        category: s.category,
+      },
+      risk: {
+        takeProfitFeePct: config.risk?.takeProfitFeePct,
+        stopLossPct: config.risk?.stopLossPct,
+      },
+      performance_stats: {
+        total_positions_closed: total,
+        wins, losses,
+        win_rate_pct: total > 0 ? Math.round(wins/total*100) : 0,
+        avg_pnl_pct: Math.round(avgPnl*100)/100,
+      },
+      has_enough_data: total >= 5
+    });
     break;
   }
 
