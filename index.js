@@ -307,11 +307,12 @@ export async function runManagementCycle({ silent = false } = {}) {
           generateAllLessons({ poolAddress: pos.pool, pair: pos.pair, pnl_pct, age, reason: 'max_hold', tirStats: pos.tirStats, closeResult }).catch(e => log("error", `Lessons failed: ${e.message}`));
           try { addLoss({ poolAddress: pos.pool, pair: pos.pair, pnl: pnl_pct, age, reason: 'max_hold' }); } catch(e) { log("error", `Loss tracking failed: ${e.message}`) };
         }
-        // Rule 4: OUT OF RANGE - IMMEDIATE EXIT (both pumped and dropped)
+        // Rule 4: OUT OF RANGE - GRACEFUL EXIT (both pumped and dropped)
+        // NEW NUANCED OOR RULES (GE approved 2026-04-08)
         else if (!pos.in_range) {
-          // SAFETY: Don't close if age < 1 minute (unless stop loss)
+          // SAFETY: Don't close if age < 2 minutes (unless stop loss)
           if (age < 2) {
-            log("management", `⚠️ SAFETY: OOR but only ${age.toFixed(1)}m old (< 2min cooldown) - SKIP CLOSE, will retry next cycle`);
+            log("management", `⚠️ SAFETY: OOR but only ${age.toFixed(1)}m old (< 2min) - SKIP, will retry next cycle`);
             continue;
           }
           
@@ -321,9 +322,21 @@ export async function runManagementCycle({ silent = false } = {}) {
             continue;
           }
           
+          // NUANCED OOR RULES:
+          // If OOR within 5 min of deployment → give up to 10 min total hold time
+          // If OOR after 5 min but before 10 min → give until 10 min total
+          // If OOR after 10 min → CLOSE immediately
           const oorType = active_bin > upper_bin ? "PUMPED" : "DROPPED";
-          log("management", `🚨🚨 OOR CLOSE (IMMEDIATE): ${pos.pair} age=${age.toFixed(1)}m active_bin ${active_bin} ${oorType === "PUMPED" ? ">" : "<"} ${oorType === "PUMPED" ? "upper" : "lower"}_bin — FORCED EXIT!`);
-          setPositionInstruction(pos.position, "CLOSE", "oor");
+          
+          if (age < 10) {
+            // Within 10 min: HOld and wait for potential recovery
+            log("management", `⚠️ OOR ${oorType}: ${pos.pair} age=${age.toFixed(1)}m (< 10min) - HOLD, waiting for recovery`);
+            continue;
+          } else {
+            // After 10 min: CLOSE immediately
+            log("management", `🚨🚨 OOR CLOSE (AFTER 10min GRACE): ${pos.pair} age=${age.toFixed(1)}m ${oorType} — FORCED EXIT!`);
+            setPositionInstruction(pos.position, "CLOSE", "oor_10min");
+          }
           let closeResult = null;
           try {
             closeResult = await closePosition({ position_address: pos.position });
