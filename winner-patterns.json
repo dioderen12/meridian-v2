@@ -9,8 +9,8 @@
       "total": 2
     },
     "16": {
-      "wins": 2,
-      "total": 2
+      "wins": 3,
+      "total": 3
     },
     "21": {
       "wins": 1,
@@ -19,14 +19,14 @@
   },
   "byTIR": {
     "80": {
-      "wins": 6,
-      "total": 6
+      "wins": 7,
+      "total": 7
     }
   },
   "byFeeYield": {
     "5": {
-      "wins": 6,
-      "total": 6
+      "wins": 7,
+      "total": 7
     }
   },
   "fastWins": [
@@ -87,6 +87,13 @@
       "age": 0,
       "tirPercent": 80,
       "timestamp": "2026-04-08T13:48:25.169Z"
+    },
+    {
+      "pair": "6rsvCUnK",
+      "pnlPct": 92.53,
+      "age": 7,
+      "tirPercent": 80,
+      "timestamp": "2026-04-08T16:25:04.461Z"
     }
   ],
   "recentWins": [
@@ -143,6 +150,15 @@
       "tirPercent": 80,
       "feeYield": 5,
       "timestamp": "2026-04-08T13:48:25.169Z"
+    },
+    {
+      "pair": "6rsvCUnK",
+      "poolAddress": "6rsvCUnKvKB2Utt1BnkqdUebuii4cQkLRx8qgh5Vyy8j",
+      "pnlPct": 92.53,
+      "age": 7,
+      "tirPercent": 80,
+      "feeYield": 5,
+      "timestamp": "2026-04-08T16:25:04.462Z"
     }
   ]
 }
