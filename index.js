@@ -243,8 +243,8 @@ export async function runManagementCycle({ silent = false } = {}) {
             log("management", `✅ Stop loss close completed: base_mint=${closeResult?.base_mint}, pnl_usd=${closeResult?.pnl_usd}`);
             // Track daily PnL
             if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
-              const { addToDailyPnL } = await import('./daily-tracker.mjs');
-              const result = addToDailyPnL(closeResult.pnl_usd);
+              const { updateFromBlockchain } = await import('./daily-tracker.mjs');
+              const result = await updateFromBlockchain();
               log("management", `📊 Daily PnL: $${result.pnl.toFixed(2)} (${result.trades} trades)`);
               if (result.limitHit) log("management", `🚨 DAILY LIMIT HIT: ${result.limitHit}`);
             }
@@ -270,8 +270,8 @@ export async function runManagementCycle({ silent = false } = {}) {
             log("management", `✅ Take profit close completed: base_mint=${closeResult?.base_mint}, pnl_usd=${closeResult?.pnl_usd}`);
             // Track daily PnL
             if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
-              const { addToDailyPnL } = await import('./daily-tracker.mjs');
-              const result = addToDailyPnL(closeResult.pnl_usd);
+              const { updateFromBlockchain } = await import('./daily-tracker.mjs');
+              const result = await updateFromBlockchain();
               log("management", `📊 Daily PnL: $${result.pnl.toFixed(2)} (${result.trades} trades)`);
               if (result.limitHit) log("management", `🚨 DAILY LIMIT HIT: ${result.limitHit}`);
             }
@@ -295,8 +295,8 @@ export async function runManagementCycle({ silent = false } = {}) {
             log("management", `✅ Max hold 10min close completed: base_mint=${closeResult?.base_mint}, pnl_usd=${closeResult?.pnl_usd}`);
             // Track daily PnL
             if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
-              const { addToDailyPnL } = await import('./daily-tracker.mjs');
-              const result = addToDailyPnL(closeResult.pnl_usd);
+              const { updateFromBlockchain } = await import('./daily-tracker.mjs');
+              const result = await updateFromBlockchain();
               log("management", `📊 Daily PnL: $${result.pnl.toFixed(2)} (${result.trades} trades)`);
               if (result.limitHit) log("management", `🚨 DAILY LIMIT HIT: ${result.limitHit}`);
             }
@@ -330,8 +330,8 @@ export async function runManagementCycle({ silent = false } = {}) {
             log("management", `✅ OOR close completed: base_mint=${closeResult?.base_mint}, pnl_usd=${closeResult?.pnl_usd}`);
             // Track daily PnL
             if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
-              const { addToDailyPnL } = await import('./daily-tracker.mjs');
-              const result = addToDailyPnL(closeResult.pnl_usd);
+              const { updateFromBlockchain } = await import('./daily-tracker.mjs');
+              const result = await updateFromBlockchain();
               log("management", `📊 Daily PnL: $${result.pnl.toFixed(2)} (${result.trades} trades)`);
               if (result.limitHit) log("management", `🚨 DAILY LIMIT HIT: ${result.limitHit}`);
             }
@@ -353,8 +353,8 @@ export async function runManagementCycle({ silent = false } = {}) {
             closeResult = await closePosition({ position_address: pos.position });
             log("management", `✅ Rule 5 close completed: pnl_usd=${closeResult?.pnl_usd}`);
             if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
-              const { addToDailyPnL } = await import('./daily-tracker.mjs');
-              addToDailyPnL(closeResult.pnl_usd);
+              const { updateFromBlockchain } = await import('./daily-tracker.mjs');
+              await updateFromBlockchain();
             }
             await forceSwapTokens(closeResult);
           } catch(e) { log("error", `Rule 5 close failed: ${e.message}`); }
@@ -371,8 +371,8 @@ export async function runManagementCycle({ silent = false } = {}) {
             closeResult = await closePosition({ position_address: pos.position });
             log("management", `✅ Rule 6 close completed: pnl_usd=${closeResult?.pnl_usd}`);
             if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
-              const { addToDailyPnL } = await import('./daily-tracker.mjs');
-              addToDailyPnL(closeResult.pnl_usd);
+              const { updateFromBlockchain } = await import('./daily-tracker.mjs');
+              await updateFromBlockchain();
             }
             await forceSwapTokens(closeResult);
           } catch(e) { log("error", `Rule 6 close failed: ${e.message}`); }
@@ -572,8 +572,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
       let screenReport = lossPatterns ? '⚠️ LOSS PATTERNS:\n' + lossPatterns + '\n' : '';
       
       // Check daily limits before deploying
-      const { canTrade, addToDailyPnL, getDailyPnL } = await import('./daily-tracker.mjs');
-      const dailyData = getDailyPnL();
+      const { canTrade, updateFromBlockchain, getDailyPnL } = await import('./daily-tracker.mjs');
+      const dailyData = await updateFromBlockchain();
       
       if (dailyData.limitHit) {
         screenReport = 'DAILY LIMIT HIT: ' + dailyData.limitHit + ' (PnL: $' + dailyData.pnl.toFixed(2) + ') - No new trades today';

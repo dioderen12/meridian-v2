@@ -4,6 +4,10 @@
       "wins": 1,
       "total": 1
     },
+    "13": {
+      "wins": 2,
+      "total": 2
+    },
     "16": {
       "wins": 2,
       "total": 2
@@ -15,14 +19,14 @@
   },
   "byTIR": {
     "80": {
-      "wins": 4,
-      "total": 4
+      "wins": 6,
+      "total": 6
     }
   },
   "byFeeYield": {
     "5": {
-      "wins": 4,
-      "total": 4
+      "wins": 6,
+      "total": 6
     }
   },
   "fastWins": [
@@ -46,6 +50,13 @@
       "age": 4,
       "tirPercent": 80,
       "timestamp": "2026-04-08T11:30:14.297Z"
+    },
+    {
+      "pair": "CSp21LA8",
+      "pnlPct": 66.07,
+      "age": 0,
+      "tirPercent": 80,
+      "timestamp": "2026-04-08T13:48:25.169Z"
     }
   ],
   "bigWins": [
@@ -69,6 +80,13 @@
       "age": 1,
       "tirPercent": 80,
       "timestamp": "2026-04-07T16:36:23.570Z"
+    },
+    {
+      "pair": "CSp21LA8",
+      "pnlPct": 66.07,
+      "age": 0,
+      "tirPercent": 80,
+      "timestamp": "2026-04-08T13:48:25.169Z"
     }
   ],
   "recentWins": [
@@ -107,6 +125,24 @@
       "tirPercent": 80,
       "feeYield": 5,
       "timestamp": "2026-04-08T11:30:14.297Z"
+    },
+    {
+      "pair": "9gEwXTxj",
+      "poolAddress": "9gEwXTxjjYL7DPxZdVZB2KVtz2DcoLmmv9Le2dxZAYYs",
+      "pnlPct": 3.14,
+      "age": 15,
+      "tirPercent": 80,
+      "feeYield": 5,
+      "timestamp": "2026-04-08T13:46:13.678Z"
+    },
+    {
+      "pair": "CSp21LA8",
+      "poolAddress": "CSp21LA8uzJGLAVJ64UzGNLqnfzEx6DycXvgDZyAhGib",
+      "pnlPct": 66.07,
+      "age": 0,
+      "tirPercent": 80,
+      "feeYield": 5,
+      "timestamp": "2026-04-08T13:48:25.169Z"
     }
   ]
 }
