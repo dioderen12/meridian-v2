@@ -234,8 +234,9 @@ export async function runManagementCycle({ silent = false } = {}) {
         
         // Rule 1: STOP LOSS -5% - IMMEDIATE CLOSE (V2 STRATEGY)
         if (pnl_pct <= -5) {
-          // Stop loss is always valid, even if < 1 min old
-          log("management", `🚨🚨 STOP LOSS CLOSE: ${pos.pair} age=${age?.toFixed(1)}m pnl ${pnl_pct}% <= -5% — FORCED EXIT!`);
+          // 🚨 STOP LOSS IS ALWAYS VALID - NO AGE CHECK!
+          // Stop loss fires IMMEDIATELY regardless of age
+          log("management", `🚨🚨 STOP LOSS CLOSE (NO AGE CHECK): ${pos.pair} age=${age?.toFixed(1)}m pnl ${pnl_pct}% <= -5% — FORCED EXIT!`);
           setPositionInstruction(pos.position, "CLOSE", "stop_loss");
           let closeResult = null;
           try {
