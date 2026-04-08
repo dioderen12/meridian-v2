@@ -356,22 +356,6 @@ export async function getV2Candidates({ limit = 20 } = {}) {
         continue;
       }
       
-      // 🚨 HARD CHECK: Volatility must be < 0.03 (3%) for stability
-      // High volatility = price swings fast = high OOR risk
-      const volatility = p.volatility || 0;
-      if (volatility >= 0.03) {
-        log("scanner", `Filtered ${p.name} - volatility ${(volatility * 100).toFixed(1)}% >= 3% (TOO VOLATILE)`);
-        continue;
-      }
-      
-      // 🚨 HARD CHECK: Check pool history from memory
-      // Skip pools with avgPnl < -10% (consistently losing)
-      const poolHistory = getPoolMemory(p.pool_address);
-      if (poolHistory && poolHistory.avg_pnl_pct < -10) {
-        log("scanner", `Filtered ${p.name} - avgPnl ${poolHistory.avg_pnl_pct.toFixed(2)}% < -10% (BAD HISTORY)`);
-        continue;
-      }
-      
       // 🚨 HARD CHECK: Skip if deployed to this pool recently (within 30 min)
       if (isRecentlyDeployed(p.pool_address)) {
         log("scanner", `Filtered ${p.name} - recently deployed (cooldown active)`);
