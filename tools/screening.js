@@ -4,6 +4,7 @@ import { isPoolBlacklisted } from "../pool-blacklist.js";
 import { log } from "../logger.js";
 import { recallForPool } from "../pool-memory.js";
 import { isDeployerBlacklisted } from "./deployer-blacklist.js";
+import { checkVolumeSpike, filterBySpike, getSpikeScore, logSpikeInfo } from "./volume-spike.js";
 
 const POOL_DISCOVERY_BASE = "https://pool-discovery-api.datapi.meteora.ag";
 
@@ -376,6 +377,21 @@ export async function getV2Candidates({ limit = 20 } = {}) {
           continue;
         }
         
+        // Check Volume Spike (MODERATE approach - filter fading only)
+        try {
+          const spikeData = await checkVolumeSpike(p.pool_address, p);
+          if (!filterBySpike(spikeData)) {
+            log("scanner", `Filtered ${p.name} - volume fading (${spikeData?.ratio}x, not confirmed)`);
+            continue;
+          }
+          // Add spike score to pool data
+          poolData.spikeData = spikeData;
+          poolData.spikeScore = getSpikeScore(spikeData);
+        } catch(e) {
+          // Volume spike check failed - continue anyway
+          log("scanner", `Spike check failed for ${p.name}: ${e.message}`);
+        }
+        
         // Cooldown check
         if (minutesSince < 10) {
           log("scanner", `Filtered ${p.name} - deployed ${Math.round(minutesSince)}m ago (within 10min cooldown)`);
@@ -388,11 +404,15 @@ export async function getV2Candidates({ limit = 20 } = {}) {
     
     log("scanner", `Pools passing v2 filters: ${v2Candidates.length}`);
     
-    // Sort by FEE YIELD (prioritas pool dengan fee tinggi - lebih profitable)
+    // Sort by FEE YIELD + SPIKE SCORE (prioritas pool dengan fee tinggi + volume spike)
     v2Candidates.sort((a, b) => {
-      const scoreA = (a.fee_yield || 0) * Math.log10(a.mcap + 1);
-      const scoreB = (b.fee_yield || 0) * Math.log10(b.mcap + 1);
-      return scoreB - scoreA;
+      const feeScoreA = (a.fee_yield || 0) * Math.log10(a.mcap + 1);
+      const feeScoreB = (b.fee_yield || 0) * Math.log10(b.mcap + 1);
+      const spikeBonusA = (a.spikeScore || 50) * 0.5; // Spike bonus
+      const spikeBonusB = (b.spikeScore || 50) * 0.5;
+      const totalScoreA = feeScoreA + spikeBonusA;
+      const totalScoreB = feeScoreB + spikeBonusB;
+      return totalScoreB - totalScoreA;
     });
     
     return {
@@ -462,4 +482,51 @@ export function getCachedScreeningResult(pool_address) {
 
 export function clearScreeningCache() {
   screeningCache.clear();
+}
+
+// ─── VOLUME TRAJECTORY ANALYSIS ──────────────────────────────────────────────
+// Check if volume is increasing or decreasing
+export async function getVolumeTrajectory(poolAddress) {
+  try {
+    // Get historical volume data from Meteora
+    const response = await fetch(`https://api.meteora.ag/api/pools/${poolAddress}/volume`);
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    
+    // Calculate volume change over time
+    const volumes = data.volume_24h || [];
+    if (volumes.length < 2) return null;
+    
+    const recent = volumes.slice(0, 6);  // Last 6 periods
+    const older = volumes.slice(6, 12);   // Previous 6 periods
+    
+    const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
+    const olderAvg = older.reduce((a, b) => a + b, 0) / older.length;
+    
+    const changePercent = ((recentAvg - olderAvg) / olderAvg) * 100;
+    
+    return {
+      recentAvg,
+      olderAvg,
+      changePercent,
+      trajectory: changePercent > 20 ? 'increasing' : changePercent < -20 ? 'decreasing' : 'stable'
+    };
+  } catch(e) {
+    return null;
+  }
+}
+
+// ─── VOLUME TRAJECTORY FILTER ────────────────────────────────────────────────
+// Filter out pools with fading volume
+export function filterByVolumeTrajectory(pool, trajectory) {
+  if (!trajectory) return true; // Can't determine, pass through
+  
+  // If volume is decreasing > 30%, likely a bad entry
+  if (trajectory.changePercent < -30) {
+    log("screening", `Filtered ${pool.name} - volume fading (${trajectory.changePercent.toFixed(1)}%)`);
+    return false;
+  }
+  
+  return true;
 }

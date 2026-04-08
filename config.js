@@ -72,8 +72,8 @@ if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
 export const config = {
   // ─── Risk Limits ─────────────────────────
   risk: {
-    maxPositions:    u.maxPositions    ?? V2_STRATEGY_LOCK.maxPositions,
-    maxDeployAmount: u.maxDeployAmount ?? V2_STRATEGY_LOCK.maxDeployAmount,
+    maxPositions:    V2_STRATEGY_LOCK.maxPositions, // ALWAYS USE LOCKED VALUE
+    maxDeployAmount: V2_STRATEGY_LOCK.maxDeployAmount, // ALWAYS USE LOCKED VALUE
   },
 
   // ─── Pool Screening Thresholds ───────────

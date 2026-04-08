@@ -1,0 +1,112 @@
+{
+  "byHour": {
+    "11": {
+      "wins": 1,
+      "total": 1
+    },
+    "16": {
+      "wins": 2,
+      "total": 2
+    },
+    "21": {
+      "wins": 1,
+      "total": 1
+    }
+  },
+  "byTIR": {
+    "80": {
+      "wins": 4,
+      "total": 4
+    }
+  },
+  "byFeeYield": {
+    "5": {
+      "wins": 4,
+      "total": 4
+    }
+  },
+  "fastWins": [
+    {
+      "pair": "CSp21LA8",
+      "pnlPct": 49.37,
+      "age": 1,
+      "tirPercent": 80,
+      "timestamp": "2026-04-07T16:30:19.167Z"
+    },
+    {
+      "pair": "CSp21LA8",
+      "pnlPct": 93.15,
+      "age": 1,
+      "tirPercent": 80,
+      "timestamp": "2026-04-07T16:36:23.570Z"
+    },
+    {
+      "pair": "6o4pSTHC",
+      "pnlPct": 11.92,
+      "age": 4,
+      "tirPercent": 80,
+      "timestamp": "2026-04-08T11:30:14.297Z"
+    }
+  ],
+  "bigWins": [
+    {
+      "pair": "HRSwLqNp",
+      "pnlPct": 16.13,
+      "age": 10,
+      "tirPercent": 80,
+      "timestamp": "2026-04-06T21:30:20.234Z"
+    },
+    {
+      "pair": "CSp21LA8",
+      "pnlPct": 49.37,
+      "age": 1,
+      "tirPercent": 80,
+      "timestamp": "2026-04-07T16:30:19.167Z"
+    },
+    {
+      "pair": "CSp21LA8",
+      "pnlPct": 93.15,
+      "age": 1,
+      "tirPercent": 80,
+      "timestamp": "2026-04-07T16:36:23.570Z"
+    }
+  ],
+  "recentWins": [
+    {
+      "pair": "HRSwLqNp",
+      "poolAddress": "HRSwLqNpd4ZfuD6HsTFpdS2nuEGPmHvZqvcQP1RKGkxM",
+      "pnlPct": 16.13,
+      "age": 10,
+      "tirPercent": 80,
+      "feeYield": 5,
+      "timestamp": "2026-04-06T21:30:20.234Z"
+    },
+    {
+      "pair": "CSp21LA8",
+      "poolAddress": "CSp21LA8uzJGLAVJ64UzGNLqnfzEx6DycXvgDZyAhGib",
+      "pnlPct": 49.37,
+      "age": 1,
+      "tirPercent": 80,
+      "feeYield": 5,
+      "timestamp": "2026-04-07T16:30:19.167Z"
+    },
+    {
+      "pair": "CSp21LA8",
+      "poolAddress": "CSp21LA8uzJGLAVJ64UzGNLqnfzEx6DycXvgDZyAhGib",
+      "pnlPct": 93.15,
+      "age": 1,
+      "tirPercent": 80,
+      "feeYield": 5,
+      "timestamp": "2026-04-07T16:36:23.570Z"
+    },
+    {
+      "pair": "6o4pSTHC",
+      "poolAddress": "6o4pSTHCd5awQhu3bqWkt49NCfZg6s5vgNrMpBY495r9",
+      "pnlPct": 11.92,
+      "age": 4,
+      "tirPercent": 80,
+      "feeYield": 5,
+      "timestamp": "2026-04-08T11:30:14.297Z"
+    }
+  ]
+}

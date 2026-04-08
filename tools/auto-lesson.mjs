@@ -1,6 +1,4 @@
-// Auto-Lesson System - ESM Module
-// Records lessons from every close
-
+// Auto-Lesson System - with Winner Analysis
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -8,9 +6,11 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LESSONS_FILE = join(__dirname, '..', 'lessons.json');
 const BLACKLIST_FILE = join(__dirname, '..', 'pool-blacklist.json');
+const WINNERS_FILE = join(__dirname, '..', 'winner-patterns.json');
 
 let lessons = [];
 let blacklist = { v2: {} };
+let winners = { byHour: {}, byTIR: {}, byFeeYield: {}, fastWins: [], bigWins: [], recentWins: [] };
 
 function loadData() {
   try {
@@ -22,6 +22,9 @@ function loadData() {
       blacklist = JSON.parse(readFileSync(BLACKLIST_FILE, 'utf8'));
       if (!blacklist.v2) blacklist.v2 = {};
     }
+    if (existsSync(WINNERS_FILE)) {
+      winners = JSON.parse(readFileSync(WINNERS_FILE, 'utf8'));
+    }
   } catch(e) {
     console.log('[LESSONS] Load error:', e.message);
   }
@@ -30,18 +33,104 @@ loadData();
 
 async function saveLessons() {
   try {
-    const data = { lessons, performance: {} };
-    writeFileSync(LESSONS_FILE, JSON.stringify(data, null, 2));
-  } catch(e) {
-    console.log('[LESSONS] Save error:', e.message);
-  }
+    writeFileSync(LESSONS_FILE, JSON.stringify({ lessons, performance: [] }, null, 2));
+  } catch(e) {}
+}
+
+function saveWinners() {
+  try {
+    writeFileSync(WINNERS_FILE, JSON.stringify(winners, null, 2));
+  } catch(e) {}
 }
 
 function log(prefix, msg) {
   console.log(`[${prefix}] ${msg}`);
 }
 
-const EXIT_REASON_LESSONS = {
+// Winner Analysis Functions
+export function analyzeWinner({ pair, poolAddress, pnlPct, age, tirPercent, feeYield }) {
+  const hour = new Date().getHours();
+  
+  // By hour
+  if (!winners.byHour[hour]) winners.byHour[hour] = { wins: 0, total: 0 };
+  winners.byHour[hour].wins++;
+  winners.byHour[hour].total++;
+  
+  // By TIR bucket
+  const tirBucket = Math.floor(tirPercent / 10) * 10;
+  if (!winners.byTIR[tirBucket]) winners.byTIR[tirBucket] = { wins: 0, total: 0 };
+  winners.byTIR[tirBucket].wins++;
+  winners.byTIR[tirBucket].total++;
+  
+  // By fee yield
+  const feeBucket = Math.floor(feeYield / 5) * 5;
+  if (!winners.byFeeYield[feeBucket]) winners.byFeeYield[feeBucket] = { wins: 0, total: 0 };
+  winners.byFeeYield[feeBucket].wins++;
+  winners.byFeeYield[feeBucket].total++;
+  
+  // Fast wins
+  if (age < 5 && pnlPct > 0) {
+    winners.fastWins.push({ pair, pnlPct, age, tirPercent, timestamp: new Date().toISOString() });
+    if (winners.fastWins.length > 20) winners.fastWins = winners.fastWins.slice(-20);
+  }
+  
+  // Big wins
+  if (pnlPct > 15) {
+    winners.bigWins.push({ pair, pnlPct, age, tirPercent, timestamp: new Date().toISOString() });
+    if (winners.bigWins.length > 20) winners.bigWins = winners.bigWins.slice(-20);
+  }
+  
+  // Recent
+  winners.recentWins.push({ pair, poolAddress, pnlPct, age, tirPercent, feeYield, timestamp: new Date().toISOString() });
+  if (winners.recentWins.length > 50) winners.recentWins = winners.recentWins.slice(-50);
+  
+  saveWinners();
+  log('WINNER', `Analyzed: ${pair} +${pnlPct}% in ${age}min`);
+}
+
+export function getBestHours() {
+  return Object.entries(winners.byHour)
+    .map(([h, d]) => ({ hour: parseInt(h), winRate: d.wins / d.total, wins: d.wins }))
+    .filter(h => h.wins >= 2)
+    .sort((a, b) => b.winRate - a.winRate)
+    .slice(0, 3);
+}
+
+export function getBestTIRRange() {
+  const entries = Object.entries(winners.byTIR)
+    .map(([b, d]) => ({ min: parseInt(b), winRate: d.wins / d.total, wins: d.wins }))
+    .filter(t => t.wins >= 2)
+    .sort((a, b) => b.winRate - a.winRate);
+  return entries[0] || { min: 70, max: 100 };
+}
+
+export function scoreCandidate({ tirPercent, feeYield, hour }) {
+  let score = 50;
+  
+  const bestTIR = getBestTIRRange();
+  if (tirPercent >= bestTIR.min) score += 20;
+  else if (tirPercent >= 70) score += 10;
+  
+  const bestHours = getBestHours();
+  if (bestHours.some(h => h.hour === hour)) score += 15;
+  
+  return Math.min(100, score);
+}
+
+export function getWinnerStats() {
+  return {
+    totalWins: winners.recentWins.length,
+    avgPnL: winners.recentWins.length > 0 
+      ? winners.recentWins.reduce((s, w) => s + w.pnlPct, 0) / winners.recentWins.length : 0,
+    bestHours: getBestHours(),
+    bestTIR: getBestTIRRange(),
+    fastWins: winners.fastWins.length,
+    bigWins: winners.bigWins.length
+  };
+}
+
+// Lesson Templates
+const EXIT_REASONS = {
   stop_loss: { tags: ['bad', 'stop_loss', 'loss'], lesson: 'Stopped out at -5%' },
   take_profit: { tags: ['good', 'take_profit', 'win'], lesson: 'Took profit at +10%' },
   max_hold: { tags: ['neutral', 'max_hold', 'completed'], lesson: 'Held for full 15 minutes' },
@@ -50,7 +139,7 @@ const EXIT_REASON_LESSONS = {
 };
 
 const TIR_LESSONS = {
-  poor_tir: { tags: ['poor-tir', 'unstable', 'risky'], lesson: 'Pool only {inRangePercent}% in range' },
+  poor_tir: { tags: ['poor-tir', 'unstable', 'risky'], lesson: 'Pool only {inRangePercent}% in range - unstable' },
   good_tir: { tags: ['good-tir', 'stable', 'safe'], lesson: 'Pool {inRangePercent}% in range - stable' },
   oor_heavy: { tags: ['oor-heavy', 'high-risk', 'avoid'], lesson: 'Pool was {outOfRangePercent}% out of range' }
 };
@@ -64,7 +153,7 @@ const WIN_PATTERNS = {
 };
 
 export async function autoAddLesson({ reason, poolAddress, pair, pnl, age, poolStats }) {
-  const template = EXIT_REASON_LESSONS[reason];
+  const template = EXIT_REASONS[reason];
   if (!template) return;
   
   const lesson = {
@@ -77,8 +166,20 @@ export async function autoAddLesson({ reason, poolAddress, pair, pnl, age, poolS
   };
   
   lessons.push(lesson);
-  log('LESSONS', `Added lesson for ${pair}: ${reason}`);
+  log('LESSONS', `Added: ${reason} for ${pair}`);
   await saveLessons();
+  
+  // If winning trade, analyze patterns
+  if (pnl > 0 && reason !== 'oor') {
+    analyzeWinner({
+      pair,
+      poolAddress,
+      pnlPct: pnl,
+      age,
+      tirPercent: poolStats?.tirPercent || 80,
+      feeYield: poolStats?.feeYield || 5
+    });
+  }
 }
 
 export function checkAutoBlacklist({ poolAddress, pair, pnl, age }) {
@@ -129,14 +230,14 @@ export async function autoBlacklistBigLoss(poolAddress, pair, pnl) {
   return false;
 }
 
-export async function analyzeWinPattern({ pnl, age, feeEarned, poolStats, entryPrice, exitPrice, inRangePercent }) {
+export async function analyzeWinPattern({ pnl, age, feeEarned, inRangePercent }) {
   const patterns = [];
   
   if (age < 5) patterns.push('fast_win');
   if (age >= 10 && age <= 15) patterns.push('slow_win');
   if (feeEarned && pnl && feeEarned > pnl * 0.5) patterns.push('fee_king');
   if (inRangePercent && inRangePercent > 90) patterns.push('in_range_master');
-  if (entryPrice && exitPrice && inRangePercent > 80 && age < 8) patterns.push('perfect_entry');
+  if (inRangePercent > 80 && age < 8) patterns.push('perfect_entry');
   
   return patterns;
 }

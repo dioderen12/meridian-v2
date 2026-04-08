@@ -33,6 +33,7 @@ function unlockPool(pool_address) {
 // RECENT DEPLOY TRACKER: Block same pool within 10 min (force different pools)
 const _recentDeploys = new Map(); // pool_address -> timestamp
 const POOL_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+const _failedDeploys = new Map(); // pool_address -> fail count
 
 function isPoolRecentlyDeployed(pool_address) {
   if (!pool_address) return false;
@@ -50,6 +51,17 @@ function isPoolRecentlyDeployed(pool_address) {
 function recordRecentDeploy(pool_address) {
   if (!pool_address) return;
   _recentDeploys.set(pool_address, Date.now());
+}
+
+function recordFailedDeploy(pool_address) {
+  if (!pool_address) return;
+  const count = (_failedDeploys.get(pool_address) || 0) + 1;
+  _failedDeploys.set(pool_address, count);
+  if (count >= 2) {
+    // Auto-blacklist if 2+ failures
+    addToBlacklist({ mint: pool_address, reason: `Failed deploy ${count}x`, strategy: "v2" }).catch(() => {});
+    _recentDeploys.set(pool_address, Date.now() + POOL_COOLDOWN_MS); // Force cooldown
+  }
 }
 
 import { addToBlacklist, removeFromBlacklist, listBlacklist } from "../token-blacklist.js";
@@ -379,10 +391,34 @@ export async function executeTool(name, args) {
       if (name === "swap_token" && result.tx) {
         notifySwap({ inputSymbol: args.input_mint?.slice(0, 8), outputSymbol: args.output_mint === "So11111111111111111111111111111111111111112" || args.output_mint === "SOL" ? "SOL" : args.output_mint?.slice(0, 8), amountIn: result.amount_in, amountOut: result.amount_out, tx: result.tx }).catch(() => {});
       } else if (name === "deploy_position") {
-        notifyDeploy({ pair: result.pool_name || args.pool_name || args.pool_address?.slice(0, 8), amountSol: args.amount_y ?? args.amount_sol ?? 0, position: result.position, tx: result.txs?.[0] ?? result.tx, priceRange: result.price_range, binStep: result.bin_step, baseFee: result.base_fee }).catch(() => {});
-        // Record this deploy for 10-min cooldown (force different pools)
-        recordRecentDeploy(args.pool_address);
+        // 🚨 BLOCK RECORDING if deploy failed
+        if (result?.error || result?.txs?.length === 0 || !result?.position) {
+          log("executor_error", `🚫 DEPLOY FAILED - NOT recording to pool-memory. Error: ${result?.error || "no position created"}`);
+        recordFailedDeploy(args.pool_address);
+        } else {
+          notifyDeploy({ pair: result.pool_name || args.pool_name || args.pool_address?.slice(0, 8), amountSol: args.amount_y ?? args.amount_sol ?? 0, position: result.position, tx: result.txs?.[0] ?? result.tx, priceRange: result.price_range, binStep: result.bin_step, baseFee: result.base_fee }).catch(() => {});
+          // Record this deploy for 10-min cooldown (force different pools)
+          recordRecentDeploy(args.pool_address);
+        }
       } else if (name === "close_position") {
+        // 🚨 HARD SAFETY: Block close if position is less than 2 minutes old
+        // This prevents premature closes that violate V2 strategy rules
+        const { getMyPositions } = await import('./dlmm.js');
+        try {
+          const allPositions = await getMyPositions();
+          const pos = allPositions.positions?.find(p => p.position === args.position_address);
+          if (pos && pos.deployed_at) {
+            const ageMs = Date.now() - new Date(pos.deployed_at).getTime();
+            const ageMin = ageMs / 60000;
+            if (ageMin < 2) {
+              log("executor_error", `🚫 HARD BLOCK: close_position BLOCKED - position only ${ageMin.toFixed(1)}m old (< 2min minimum)`);
+              return { error: `HARD BLOCK: Position only ${ageMin.toFixed(1)}m old - must wait 2 minutes before close` };
+            }
+          }
+        } catch(e) {
+          log("executor_warn", `Age check failed: ${e.message} - proceeding with close`);
+        }
+        
         notifyClose({ pair: result.pool_name || args.position_address?.slice(0, 8), pnlUsd: result.pnl_usd ?? 0, pnlPct: result.pnl_pct ?? 0 }).catch(() => {});
         // 🚨 FORCE AUTO-SWAP: All base tokens to SOL after close
         // No threshold - ANY remaining balance gets swapped to SOL

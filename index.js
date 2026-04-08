@@ -234,10 +234,12 @@ export async function runManagementCycle({ silent = false } = {}) {
         
         // Rule 1: STOP LOSS -5% - IMMEDIATE CLOSE (V2 STRATEGY)
         if (pnl_pct <= -5) {
-          log("management", `🚨🚨 STOP LOSS CLOSE: ${pos.pair} pnl ${pnl_pct}% <= -5% — FORCED EXIT!`);
+          // Stop loss is always valid, even if < 1 min old
+          log("management", `🚨🚨 STOP LOSS CLOSE: ${pos.pair} age=${age?.toFixed(1)}m pnl ${pnl_pct}% <= -5% — FORCED EXIT!`);
           setPositionInstruction(pos.position, "CLOSE", "stop_loss");
+          let closeResult = null;
           try {
-            const closeResult = await closePosition({ position_address: pos.position });
+            closeResult = await closePosition({ position_address: pos.position });
             log("management", `✅ Stop loss close completed: base_mint=${closeResult?.base_mint}, pnl_usd=${closeResult?.pnl_usd}`);
             // Track daily PnL
             if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
@@ -260,10 +262,11 @@ export async function runManagementCycle({ silent = false } = {}) {
         // Exit early only if profit ≥10% — don't exit for less
         // This ensures we take profit when available, not "sembarangan"
         else if (pnl_pct >= 10) {
-          log("management", `🚨🚨 TAKE PROFIT CLOSE: ${pos.pair} pnl ${pnl_pct}% >= 10% — FORCED EXIT!`);
+          log("management", `🚨🚨 TAKE PROFIT CLOSE: ${pnl_pct >= 10 ? "YES" : "NO"} pnl ${pnl_pct}% >= 10% — FORCED EXIT!`);
           setPositionInstruction(pos.position, "CLOSE", "take_profit");
+          let closeResult = null;
           try {
-            const closeResult = await closePosition({ position_address: pos.position });
+            closeResult = await closePosition({ position_address: pos.position });
             log("management", `✅ Take profit close completed: base_mint=${closeResult?.base_mint}, pnl_usd=${closeResult?.pnl_usd}`);
             // Track daily PnL
             if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
@@ -284,10 +287,11 @@ export async function runManagementCycle({ silent = false } = {}) {
         // No exceptions, no extensions — PnL doesn't matter, time is the trigger
         else if (age >= 15) {
           // 🚨 HARD RULE: 15 min = FORCED EXIT regardless of PnL
-          log("management", `⏰⏰⏰ MAX HOLD 15min REACHED: ${pos.pair} pnl ${pnl_pct}% — FORCED EXIT!`);
+          log("management", `⏰⏰⏰ MAX HOLD 15min REACHED: ${pos.pair} age=${age.toFixed(1)}m pnl ${pnl_pct}% — FORCED EXIT!`);
           setPositionInstruction(pos.position, "CLOSE", "max_hold_15min");
+          let closeResult = null;
           try {
-            const closeResult = await closePosition({ position_address: pos.position });
+            closeResult = await closePosition({ position_address: pos.position });
             log("management", `✅ Max hold 10min close completed: base_mint=${closeResult?.base_mint}, pnl_usd=${closeResult?.pnl_usd}`);
             // Track daily PnL
             if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
@@ -305,8 +309,20 @@ export async function runManagementCycle({ silent = false } = {}) {
         }
         // Rule 4: OUT OF RANGE - IMMEDIATE EXIT (both pumped and dropped)
         else if (!pos.in_range) {
+          // SAFETY: Don't close if age < 1 minute (unless stop loss)
+          if (age < 2) {
+            log("management", `⚠️ SAFETY: OOR but only ${age.toFixed(1)}m old (< 2min cooldown) - SKIP CLOSE, will retry next cycle`);
+            continue;
+          }
+          
+          // SAFETY: Require valid bin data for OOR判断
+          if (!active_bin || !lower_bin || !upper_bin) {
+            log("management", `⚠️ SAFETY: OOR but missing bin data - SKIP CLOSE, will retry next cycle`);
+            continue;
+          }
+          
           const oorType = active_bin > upper_bin ? "PUMPED" : "DROPPED";
-          log("management", `🚨🚨 OOR CLOSE (IMMEDIATE): ${pos.pair} active_bin ${active_bin} ${oorType === "PUMPED" ? ">" : "<"} ${oorType === "PUMPED" ? "upper" : "lower"}_bin — FORCED EXIT!`);
+          log("management", `🚨🚨 OOR CLOSE (IMMEDIATE): ${pos.pair} age=${age.toFixed(1)}m active_bin ${active_bin} ${oorType === "PUMPED" ? ">" : "<"} ${oorType === "PUMPED" ? "upper" : "lower"}_bin — FORCED EXIT!`);
           setPositionInstruction(pos.position, "CLOSE", "oor");
           let closeResult = null;
           try {
@@ -326,6 +342,42 @@ export async function runManagementCycle({ silent = false } = {}) {
           generateAllLessons({ poolAddress: pos.pool, pair: pos.pair, pnl_pct, age, reason: 'oor', tirStats: pos.tirStats, closeResult }).catch(e => log("error", `Lessons failed: ${e.message}`));
           try { addLoss({ poolAddress: pos.pool, pair: pos.pair, pnl: pnl_pct, age, reason: 'oor' }); } catch(e) { log("error", `Loss tracking failed: ${e.message}`) };
           try { checkAutoBlacklist({ reason: 'oor', poolAddress: pos.pool, pair: pos.pair, pnl: pnl_pct, age }); } catch(e) { log("error", `Auto-blacklist failed: ${e.message}`) };
+        }
+        // Rule 5: active_bin > upper_bin + 10 → CLOSE (pumped far above range)
+        // This is hard-coded to prevent LLM from triggering premature close
+        else if (active_bin > upper_bin + 10) {
+          log("management", `🚨🚨 RULE 5 CLOSE: ${pos.pair} active_bin ${active_bin} > upper_bin ${upper_bin} + 10 — FORCED EXIT!`);
+          setPositionInstruction(pos.position, "CLOSE", "rule5_pumped");
+          let closeResult = null;
+          try {
+            closeResult = await closePosition({ position_address: pos.position });
+            log("management", `✅ Rule 5 close completed: pnl_usd=${closeResult?.pnl_usd}`);
+            if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
+              const { addToDailyPnL } = await import('./daily-tracker.mjs');
+              addToDailyPnL(closeResult.pnl_usd);
+            }
+            await forceSwapTokens(closeResult);
+          } catch(e) { log("error", `Rule 5 close failed: ${e.message}`); }
+          generateAllLessons({ poolAddress: pos.pool, pair: pos.pair, pnl_pct, age, reason: 'rule5_pumped', tirStats: pos.tirStats, closeResult }).catch(e => log("error", `Lessons failed: ${e.message}`));
+          try { addLoss({ poolAddress: pos.pool, pair: pos.pair, pnl: pnl_pct, age, reason: 'rule5_pumped' }); } catch(e) { log("error", `Loss tracking failed: ${e.message}`) };
+        }
+        // Rule 6: active_bin > upper_bin AND oor_minutes >= 0 → CLOSE (stale above range)
+        // Note: outOfRangeWaitMinutes = 0 means IMMEDIATE exit if OOR and price above upper
+        else if (active_bin > upper_bin) {
+          log("management", `🚨🚨 RULE 6 CLOSE: ${pos.pair} active_bin ${active_bin} > upper_bin ${upper_bin} — FORCED EXIT!`);
+          setPositionInstruction(pos.position, "CLOSE", "rule6_stale");
+          let closeResult = null;
+          try {
+            closeResult = await closePosition({ position_address: pos.position });
+            log("management", `✅ Rule 6 close completed: pnl_usd=${closeResult?.pnl_usd}`);
+            if (closeResult?.pnl_usd !== undefined && closeResult?.pnl_usd !== null) {
+              const { addToDailyPnL } = await import('./daily-tracker.mjs');
+              addToDailyPnL(closeResult.pnl_usd);
+            }
+            await forceSwapTokens(closeResult);
+          } catch(e) { log("error", `Rule 6 close failed: ${e.message}`); }
+          generateAllLessons({ poolAddress: pos.pool, pair: pos.pair, pnl_pct, age, reason: 'rule6_stale', tirStats: pos.tirStats, closeResult }).catch(e => log("error", `Lessons failed: ${e.message}`));
+          try { addLoss({ poolAddress: pos.pool, pair: pos.pair, pnl: pnl_pct, age, reason: 'rule6_stale' }); } catch(e) { log("error", `Loss tracking failed: ${e.message}`) };
         }
       }
 

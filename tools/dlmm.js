@@ -621,7 +621,7 @@ export async function closePosition({ position_address }) {
         log("close", `Step 1 OK: ${txHashes.join(", ")}`);
       }
     } catch (e) {
-      log("close_warn", `Step 1 (Claim) failed or nothing to claim: ${e.message}`);
+      log("close_warn", `Step 1 (Claim) failed or nothing to claim: ${e.message}`); if (/not found/i.test(e.message)) { log("close_warn", "Position already closed or not found - skipping"); return { success: true, already_closed: true, position_address }; }
     }
 
     // ─── Step 2: Remove Liquidity & Close ──────────────────────
