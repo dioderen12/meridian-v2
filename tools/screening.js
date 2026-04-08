@@ -340,7 +340,20 @@ export async function getV2Candidates({ limit = 20 } = {}) {
       
       // 🚨 RUG SUSPECT DETECTION: Check for volume manipulation
       // Scammers fake volume to attract LPs - detect artificial volume spikes
+      // 🚨 HARD CHECK: Volume must be >= 1000 SOL (V2 STRATEGY)
       const volume = p.volume || 0;
+      const minRequiredVolume = 1000; // HARD CODED - $1000 at $1/SOL minimum
+      if (volume < minRequiredVolume) {
+        log("scanner", `Filtered ${p.name} - volume ${volume.toFixed(1)} SOL < ${minRequiredVolume} (HARD REQUIRED)`);
+        continue;
+      }
+      
+      // 🚨 HARD CHECK: Dead pool detection - volume must be > 0
+      if (volume === 0) {
+        log("scanner", `Filtered ${p.name} - DEAD POOL (volume = 0)`);
+        continue;
+      }
+      
       const volumeToMcapRatio = volume > 0 && mcap > 0 ? (volume * 100) / (mcap / 1000) : 0; // volume as % of mcap
       const isSuspiciousVolume = volumeToMcapRatio > 5; // volume > 5% of mcap is suspicious
       
